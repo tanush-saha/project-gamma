@@ -1,14 +1,12 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { createBrowserRouter, Link, Navigate, Outlet, RouterProvider, useLocation, useNavigate, useParams } from "react-router-dom";
 import { openBooks } from "./books.js";
 import { courses, publicTextbooks, textbookCaution } from "./curriculum.js";
-import { deletePrivateBook, getPrivateBook, listPrivateBooks, MAX_PRIVATE_BOOK_BYTES, savePrivateBook } from "./bookshelf.js";
 import { firebaseConfigured, loadFirebase } from "./firebase.js";
-import { COMMUNITY_FILE_LIMIT, communityApiConfigured, communityApiUrl, communityRequest, formatFileSize } from "./community.js";
+import { Badge, Button, Card, EmptyState, ProgressBar, Skeleton, Tabs, ThemeToggle, Toast } from "./components/ui.jsx";
 import "./styles.css";
 
-const Simulations = lazy(() => import("./Simulations.jsx"));
-const Models3D = lazy(() => import("./Models3D.jsx"));
 const tracks = [
   { id: "PCM", name: "Physics · Chemistry · Maths", short: "PCM", mark: "∑" },
   { id: "PCB", name: "Physics · Chemistry · Biology", short: "PCB", mark: "✳" },
@@ -16,12 +14,24 @@ const tracks = [
   { id: "Humanities", name: "Humanities", short: "HUM", mark: "¶" },
 ];
 const guestStorageKey = "study-shelf-profile-v2";
+const StudyContext = createContext(null);
+
+function useStudy() {
+  const context = useContext(StudyContext);
+  if (!context) throw new Error("Study Shelf pages must be rendered inside the app.");
+  return context;
+}
 
 function belongsToTrack(book, track) {
-  const sharedSubject = book.subject?.trim().toLowerCase();
+  if (track === "all") return true;
+  const subjects = (book.subjects || [book.subject]).map((subject) => subject.trim().toLowerCase());
   return book.track === track
-    || ((track === "PCM" || track === "PCB") && ["physics", "chemistry"].includes(sharedSubject))
-    || ((track === "Commerce" || track === "Humanities") && sharedSubject === "economics");
+    || ((track === "PCM" || track === "PCB") && subjects.some((subject) => ["physics", "chemistry"].includes(subject)))
+    || ((track === "Commerce" || track === "Humanities") && subjects.includes("economics"));
+}
+
+function getBookSubjects(book) {
+  return book.subjects || [book.subject];
 }
 
 function readGuestProfile() {
@@ -52,31 +62,12 @@ function writeGuestProfile(profile) {
   }
 }
 
-function useStudyRoute() {
-  const [route, setRoute] = useState(() => {
-    const initial = window.location.hash.replace(/^#\/?/, "").split("?")[0];
-    return initial || "home";
-  });
-
-  useEffect(() => {
-    const updateRoute = () => {
-      const next = window.location.hash.replace(/^#\/?/, "").split("?")[0] || "home";
-      setRoute(next);
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    };
-    window.addEventListener("hashchange", updateRoute);
-    return () => window.removeEventListener("hashchange", updateRoute);
-  }, []);
-
-  return route;
-}
-
 function Brand() {
   return (
-    <a className="brand" href="#/" aria-label="Study Shelf home">
+    <Link className="brand" to="/" aria-label="Study Shelf home">
       <span className="brand-icon" aria-hidden="true">s.</span>
       <span>study shelf</span>
-    </a>
+    </Link>
   );
 }
 
@@ -173,58 +164,64 @@ function MotionEffects() {
   </>;
 }
 
-function Header({ user, savedCount, onSignIn, onSignOut, syncError }) {
+function Header({ user, route, savedCount, onSignOut, syncError }) {
   const displayName = user?.displayName || user?.email?.split("@")[0];
+  const isCurrent = (path) => route === path || (path !== "/" && route.startsWith(`${path}/`));
   return (
     <>
       <header className="topbar">
         <Brand />
         <nav className="topnav" aria-label="Main navigation">
-          <a href="#/library">Books</a>
-          <a href="#/topics">Study map</a>
-          <a href="#/simulations">Simulations</a>
-          <a href="#/models">3D models</a>
+          <Link to="/" aria-current={isCurrent("/") ? "page" : undefined}>Home</Link>
+          <Link to="/library" aria-current={isCurrent("/library") ? "page" : undefined}>Discover</Link>
+          {user && !user.isAnonymous && <>
+            <Link to="/dashboard" aria-current={isCurrent("/dashboard") ? "page" : undefined}>Workspace</Link>
+            <Link to="/dashboard/progress" aria-current={isCurrent("/dashboard/progress") ? "page" : undefined}>Study map</Link>
+            <Link to="/dashboard/shelf" aria-current={isCurrent("/dashboard/shelf") ? "page" : undefined}>My PDFs</Link>
+          </>}
         </nav>
         <div className="header-account">
-          <a className="saved-link" href="#/library">
+          <Link className="saved-link" to={user && !user.isAnonymous ? "/dashboard/library" : "/login"}>
             <span className="saved-star" aria-hidden="true">✳</span>
             <span className="saved-label">Saved</span> <span className="saved-count">{savedCount}</span>
-          </a>
+          </Link>
           {user && !user.isAnonymous ? (
             <div className="user-menu">
-              <a className="user-name" href="#/account" title={user.email || ""}>{displayName || "My account"}</a>
+              <Link className="user-name" to="/dashboard/settings" title={user.email || ""}>{displayName || "My account"}</Link>
               <button onClick={onSignOut} className="sign-in-button">Sign out</button>
             </div>
           ) : (
-            <button onClick={onSignIn} className="sign-in-button">{user?.isAnonymous ? "Secure shelf" : "Sign in"}</button>
+            <Link to="/login" className="sign-in-button">{user?.isAnonymous ? "Secure shelf" : "Sign in"}</Link>
           )}
         </div>
       </header>
-      {syncError && <div className="global-error" role="status">{syncError}</div>}
+      {syncError && <Toast variant="error">{syncError}</Toast>}
     </>
   );
 }
 
-function Footer() {
+function Footer({ user }) {
   return (
     <footer className="footer">
       <Brand />
       <p>Made for the next question.</p>
       <nav className="footer-navigation" aria-label="More pages">
-        <a href="#/topics">Topics</a><a href="#/library">Books</a>
-        <a href="#/simulations">Simulations</a><a href="#/models">3D models</a>
+        <Link to="/">Home</Link><Link to="/library">Discover books</Link>
+        <Link to="/about">About</Link><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link>
+        {(!user || user.isAnonymous) && <><Link to="/login">Sign in</Link><Link to="/signup">Create account</Link></>}
+        {user && !user.isAnonymous && <><Link to="/dashboard">Workspace</Link><Link to="/dashboard/progress">Study map</Link>
+          <Link to="/dashboard/library">Saved books</Link><Link to="/dashboard/shelf">My PDFs</Link></>}
       </nav>
       <span className="footer-small">© 2026 STUDY SHELF · READ WITH CURIOSITY</span>
     </footer>
   );
 }
 
-function PageLoading() {
-  return <div className="page-loading" aria-live="polite">Getting the learning lab ready…</div>;
-}
-
-function HomePage({ onChooseTrack, savedCount, completedCount }) {
-  const completionPercent = Math.round((completedCount / courses.reduce((sum, course) => sum + course.units.length, 0)) * 100);
+function HomePage({ onChooseTrack, savedCount, savedIds, onToggleSaved, onSearchSources, completedCount, user }) {
+  const [sourceSearch, setSourceSearch] = useState("");
+  const completionPercent = completedCount > 0
+    ? Math.max(1, Math.round((completedCount / courses.reduce((sum, course) => sum + course.units.length, 0)) * 100))
+    : 0;
   function moveHeroArtwork(event) {
     if (window.matchMedia("(pointer: coarse), (prefers-reduced-motion: reduce)").matches) return;
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -242,13 +239,15 @@ function HomePage({ onChooseTrack, savedCount, completedCount }) {
       <section className="hero" data-reveal>
         <div className="hero-copy">
           <p className="eyebrow"><span className="eyebrow-dot" /> A little more curious, every day</p>
-          <h1>Good books.<br /><em>Big ideas.</em></h1>
+          <h1>Read deeper.<br /><em>Find your way.</em></h1>
           <p className="hero-description">
-            Your free study space for CBSE and NCERT Classes 11 &amp; 12.
-            Find textbook chapters, track every topic, run an experiment, and explore ideas in 3D.
+            A thoughtful home for books, ideas and study momentum across PCM, PCB, Commerce and Humanities.
+            Find a good source, follow your syllabus, and pick up where you left off.
           </p>
-          <a className="hero-cta" href="#/topics">Start with the study map <span aria-hidden="true">↘</span></a>
-          <div className="hero-footnote"><span className="footnote-line" /><span>Free to use. Learning stays in your hands.</span></div>
+          <Link className="hero-cta" to={user ? "/dashboard" : "/signup"}>
+            {user ? "Open your workspace" : "Step into your space"} <span aria-hidden="true">↘</span></Link>
+          <Link className="hero-secondary-link" to="/library">Explore the open library <span aria-hidden="true">↗</span></Link>
+          <div className="hero-footnote"><span className="footnote-line" /><span>Good books. Thoughtfully found. Progress that stays yours.</span></div>
         </div>
         <div className="hero-art" aria-label="Illustration of a stack of books" role="img"
           onPointerMove={moveHeroArtwork} onPointerLeave={resetHeroArtwork}>
@@ -262,15 +261,15 @@ function HomePage({ onChooseTrack, savedCount, completedCount }) {
           <span className="art-caption">YOUR NEXT CHAPTER STARTS HERE</span>
           <span className="art-sparkle sparkle-one">✳</span><span className="art-sparkle sparkle-two">✳</span>
         </div>
-        <div className="hero-index"><span>FREE</span> / FOREVER</div>
+        <div className="hero-index"><span>BUILT FOR</span> / YOUR NEXT PAGE</div>
       </section>
       <div className="ticker" aria-label="A good place to start"><div className="ticker-track">
         {Array.from({ length: 4 }, (_, index) => <span key={index}>FOLLOW THE QUESTION <b>✳</b> TRY SOMETHING NEW <b>✳</b></span>)}
       </div></div>
       <section className="section-wrap home-pathways" data-reveal>
         <div className="section-heading">
-          <div><p className="eyebrow">01 — CHOOSE YOUR STUDY PATH</p><h2>One starting point.<br /><em>All the way through.</em></h2></div>
-          <p className="section-aside">24 courses · hundreds of study units<br />Checklists update with the current syllabus.</p>
+          <div><p className="eyebrow">01 — A SHELF WITH A SENSE OF DIRECTION</p><h2>What are you<br /><em>here to explore?</em></h2></div>
+          <p className="section-aside">Four study paths · 24 subjects<br />Begin with a question. Find your way from there.</p>
         </div>
         <div className="pathway-grid">
           {tracks.map((track, index) => (
@@ -281,23 +280,86 @@ function HomePage({ onChooseTrack, savedCount, completedCount }) {
           ))}
         </div>
       </section>
-      <section className="home-feature-strip" data-reveal>
-        <a className="feature-card" href="#/topics"><span className="feature-index">01 / TRACK</span><span className="feature-mark">✓</span>
-          <h3>See where you are.</h3><p>Tick off syllabus topics as you learn. Your coverage and progress stay in your study map.</p>
-          <strong>{completedCount} topics complete · {completionPercent}% of map</strong></a>
-        <a className="feature-card" href="#/simulations"><span className="feature-index">02 / EXPLORE</span><span className="feature-mark">∿</span>
-          <h3>Change a variable.</h3><p>Launch a ball, reshape a graph, cross some alleles, or find a market equilibrium.</p><strong>5 browser-based experiments ↗</strong></a>
-        <a className="feature-card" href="#/models"><span className="feature-index">03 / ROTATE</span><span className="feature-mark">◉</span>
-          <h3>Look closer.</h3><p>Rotate a molecule, a cell, and a crystal lattice with interactive 3D models.</p><strong>4 interactive models ↗</strong></a>
-        <a className="feature-card" href="#/library"><span className="feature-index">04 / READ</span><span className="feature-mark">▤</span>
-          <h3>Find the right book.</h3><p>Browse official NCERT books, free publisher PDFs, and your own private PDFs.</p><strong>{savedCount} books saved ↗</strong></a>
+      <section className="home-source-preview page-wrap" data-reveal>
+        <div className="dashboard-section-heading"><div><p className="eyebrow">A FEW TRUSTED PLACES TO BEGIN</p>
+          <h2>Find the source.<br /><em>Follow the idea.</em></h2></div>
+          <form className="home-source-search" role="search" onSubmit={(event) => {
+            event.preventDefault();
+            onSearchSources(sourceSearch);
+          }}>
+            <label className="sr-only" htmlFor="home-source-search">Search open books</label>
+            <input id="home-source-search" type="search" value={sourceSearch} onChange={(event) => setSourceSearch(event.target.value)}
+              placeholder="Search a subject or title" />
+            <button type="submit" aria-label="Search the open library">Search ↗</button>
+          </form>
+        </div>
+        <div className="book-grid">{openBooks.slice(0, 3).map((book, index) => <BookCard key={book.id} book={book}
+          saved={savedIds.includes(book.id)} onToggle={onToggleSaved} style={{ "--card-index": index }} />)}</div>
+        <Link className="hero-secondary-link" to="/library">Explore all official and open sources <span aria-hidden="true">↗</span></Link>
+      </section>
+      <section className="home-feature-strip" id="how-it-works" data-reveal>
+        <Link className="feature-card" to="/dashboard/progress"><span className="feature-index">01 / FIND YOUR THREAD</span><span className="feature-mark">✓</span>
+          <h3>Make the syllabus yours.</h3><p>A clear Class XI–XII study map for every stream. Check off the topics you have covered and pick up where you left off.</p>
+          <strong>{completedCount} {completedCount === 1 ? "topic" : "topics"} complete · {completionPercent}% of map</strong></Link>
+        <Link className="feature-card" to="/library"><span className="feature-index">02 / READ WITH INTENTION</span><span className="feature-mark">▤</span>
+          <h3>A shelf worth returning to.</h3><p>Find official textbooks and open books from their publishers. Save the ones you want within reach.</p><strong>{savedCount} books on your shelf ↗</strong></Link>
+        <Link className="feature-card" to={user ? "/dashboard/shelf" : "/signup"}><span className="feature-index">03 / MAKE IT YOURS</span><span className="feature-mark">⌂</span>
+          <h3>Your learning, in one place.</h3><p>Your account brings your saved reading and study progress along when you switch devices.</p><strong>{user ? "Open your personal shelf ↗" : "Create a free account ↗"}</strong></Link>
+        <Link className="feature-card" to={user ? "/dashboard/progress" : "/signup"}><span className="feature-index">04 / KEEP YOUR PLACE</span><span className="feature-mark">↗</span>
+          <h3>Pick up where you left off.</h3><p>Your private study map and, if you enable Firebase Storage, your cloud PDF shelf are there when you sign in.</p><strong>{user ? "Continue learning ↗" : "Create an account ↗"}</strong></Link>
       </section>
       <section className="manifesto"><div className="manifesto-shape" aria-hidden="true">S</div>
         <p className="eyebrow">A NOTE FROM THE SHELF</p><h2>Learning isn’t a<br />race to the <em>last page.</em></h2>
-        <p className="manifesto-copy">Progress is personal. A good book, a clear picture, and space to practise are a pretty good start.</p>
-        <a href="#/topics" className="manifesto-link">Find your starting point <span>↗</span></a>
+        <p className="manifesto-copy">A reading life is made of small discoveries: a book that opens a door, a question that stays with you, and a place to keep the thread.</p>
+        <Link to="/library" className="manifesto-link">Step inside the library <span>↗</span></Link>
       </section>
     </>
+  );
+}
+
+function DashboardPage({ user, savedCount, completedIds, completedCount }) {
+  const totalUnits = courses.reduce((sum, course) => sum + course.units.length, 0);
+  const nextCourse = courses.find((course) => course.units.some((unit) => !completedIds.includes(unit.id)));
+  const nextUnit = nextCourse?.units.find((unit) => !completedIds.includes(unit.id));
+  const firstBooks = [...publicTextbooks, ...openBooks].slice(0, 3);
+
+  return (
+    <section className="page-wrap dashboard-page" data-reveal>
+      <p className="eyebrow"><span className="eyebrow-dot" /> YOUR STUDY SHELF · A SPACE TO PICK UP THE THREAD</p>
+      <div className="dashboard-welcome">
+        <div><p className="dashboard-kicker">A NEW PAGE, {new Date().toLocaleDateString(undefined, { weekday: "long" }).toUpperCase()}</p>
+          <h1>{user?.displayName ? `Welcome back, ${user.displayName.split(" ")[0]}.` : "Welcome to your shelf."}<br />
+            <em>Where to next?</em></h1>
+          <p>One place for your books, your progress, and the next thing you want to understand.</p>
+        </div>
+        <Link className="hero-cta" to={nextCourse ? "/dashboard/progress" : "/library"}>{nextCourse ? "Continue your study map" : "Explore a book"} <span aria-hidden="true">↗</span></Link>
+      </div>
+      <div className="dashboard-metrics">
+        <article className="dashboard-metric"><span>YOUR READING LIST</span><strong>{savedCount.toString().padStart(2, "0")}</strong><Link to="/dashboard/library">Saved titles ↗</Link></article>
+        <article className="dashboard-metric"><span>TOPICS EXPLORED</span><strong>{completedCount.toString().padStart(2, "0")}</strong><Link to="/dashboard/progress">{totalUnits} across 24 courses ↗</Link></article>
+        <article className="dashboard-metric"><span>YOUR NEXT CHAPTER</span><strong>{nextCourse ? `CLASS ${nextCourse.grade}` : "READY"}</strong><Link to="/dashboard/progress">{nextCourse?.subject || "Every topic complete"} ↗</Link></article>
+      </div>
+      {nextUnit && <section className="dashboard-next-card">
+        <div className="next-card-mark" aria-hidden="true">✳</div>
+        <div><p className="eyebrow">A GENTLE PLACE TO BEGIN · CLASS {nextCourse.grade} {nextCourse.subject.toUpperCase()}</p>
+          <h2>{nextUnit.title}</h2><p>{nextUnit.chapter} · Pick up at your own pace.</p></div>
+        <Link to="/dashboard/progress">Open your study map <span aria-hidden="true">↗</span></Link>
+      </section>}
+      <div className="dashboard-section-heading"><div><p className="eyebrow">A FEW WAYS IN</p><h2>Make this space <em>yours.</em></h2></div>
+        <span>Your reading and study tools, all together.</span></div>
+      <div className="dashboard-action-grid">
+        <Link to="/library" className="dashboard-action action-library"><span>01 / DISCOVER</span><i>↗</i><strong>Find a book</strong><small>Explore official textbooks and freely available publisher books.</small></Link>
+        <Link to="/dashboard/progress" className="dashboard-action action-topics"><span>02 / STUDY</span><i>✓</i><strong>Follow your syllabus</strong><small>Explore classes, subjects, chapters, and learning points.</small></Link>
+        <Link to="/dashboard/library" className="dashboard-action action-shelf"><span>03 / YOUR READING LIST</span><i>▤</i><strong>Return to a favorite</strong><small>Find the books you have saved to read next.</small></Link>
+      </div>
+      <section className="dashboard-reading">
+        <div className="dashboard-section-heading"><div><p className="eyebrow">A FEW RECOMMENDED STARTING POINTS</p><h2>Open a good <em>book.</em></h2></div>
+          <Link to="/library">See the full collection ↗</Link></div>
+        <div className="dashboard-book-list">{firstBooks.map((book, index) => <Link className="dashboard-book-row" to={`/book/${book.id}`} key={book.id}>
+          <span>0{index + 1}</span><div><strong>{book.title}</strong><small>{book.author} · {book.subject}</small></div><b>↗</b>
+        </Link>)}</div>
+      </section>
+    </section>
   );
 }
 
@@ -327,8 +389,7 @@ function TopicPage({ trackFilter, onTrackChange, completedIds, onToggle, firebas
       <div className="coverage-panel">
         <div className="coverage-copy"><span>YOUR COVERAGE</span><strong>{percent}%</strong>
           <p>{completed} of {matchingUnits.length} topics complete</p></div>
-        <div className="coverage-track" role="progressbar" aria-label="Topic coverage" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
-          <span style={{ width: `${percent}%` }} /></div>
+        <ProgressBar className="coverage-track" label="Topic coverage" value={percent} />
         {!firebaseUser && firebaseConfigured && <button className="coverage-account" onClick={onSignIn}>Sign in to sync your progress across devices ↗</button>}
         {!firebaseConfigured && <p className="coverage-account-hint">Progress is saved on this browser. Add free Firebase settings to enable login and syncing.</p>}
       </div>
@@ -380,9 +441,9 @@ function TopicPage({ trackFilter, onTrackChange, completedIds, onToggle, firebas
                     <span><small>{unit.chapter}</small><strong>{unit.title}</strong></span>
                   </label>
                 ))}
-                <a className="unit-book-link" href="#/library">
+                <Link className="unit-book-link" to="/library">
                   Open the official NCERT Class {course.grade} {course.subject} textbook ↗
-                </a>
+                </Link>
                 {!book && <span className="unit-note">Find the relevant chapter by its heading in the NCERT book.</span>}
               </div>
             </details>
@@ -399,16 +460,16 @@ function BookCard({ book, saved, onToggle, style }) {
   const link = book.publicPath ? `${import.meta.env.BASE_URL}${book.publicPath}` : book.href;
   return (
     <article className="book-card" style={style}>
-      <a className={`book-cover cover-${book.color}`} href={link} target="_blank" rel="noreferrer"
-        aria-label={`${book.publicPath ? "Read or download" : "Open"} ${book.title}`}>
-        <span className="cover-topline">{book.type === "official" ? "NCERT · OFFICIAL" : book.publisher} <span>·</span> {book.number}</span>
+      <Link className={`book-cover cover-${book.color}`} to={`/book/${book.id}`}
+        aria-label={`View details for ${book.title}`}>
+        <span className="cover-topline">{book.type === "official" ? `${book.publisher} · OFFICIAL` : book.publisher} <span>·</span> {book.number}</span>
         <span className="cover-orb" /><span className="cover-title">{book.cover}</span>
-        <span className="cover-bottomline">{book.publicPath ? "AVAILABLE ON THIS SITE" : "OPEN PUBLISHER BOOK"}</span>
+        <span className="cover-bottomline">{book.publicPath ? "AVAILABLE ON THIS SITE" : "OPEN AT SOURCE"}</span>
         <span className="cover-open" aria-hidden="true">↗</span>
-      </a>
+      </Link>
       <div className="book-details">
-        <div className="book-meta"><span>{book.subject}</span><span>{book.level}</span></div>
-        <h3>{book.title}</h3><p className="book-author">By {book.author}</p>
+        <div className="book-meta"><span>{getBookSubjects(book).join(" · ")}</span><span>{book.level}</span></div>
+        <h3><Link to={`/book/${book.id}`}>{book.title}</Link></h3><p className="book-author">By {book.author}</p>
         <p className="book-description">{book.description}</p>
         <div className="book-actions">
           <a className="source-link" href={link} target="_blank" rel="noreferrer">
@@ -422,396 +483,269 @@ function BookCard({ book, saved, onToggle, style }) {
   );
 }
 
-function BookPage({ savedIds, onToggleSaved, onSignIn, firebaseUser, firebaseReady }) {
-  const [track, setTrack] = useState("PCM");
+function BookPage({ savedIds, onToggleSaved, initialSavedOnly = false }) {
+  const location = useLocation();
+  const [track, setTrack] = useState(initialSavedOnly ? "all" : "all");
   const [grade, setGrade] = useState("all");
-  const [search, setSearch] = useState("");
-  const [savedOnly, setSavedOnly] = useState(false);
-  const [privateBooks, setPrivateBooks] = useState([]);
-  const [privateError, setPrivateError] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [reader, setReader] = useState(null);
-  const [cloudBooks, setCloudBooks] = useState([]);
-  const [communityLoading, setCommunityLoading] = useState(false);
-  const [communityError, setCommunityError] = useState("");
-  const [communityMessage, setCommunityMessage] = useState("");
-  const [uploadFormOpen, setUploadFormOpen] = useState(false);
-  const [communitySubmitting, setCommunitySubmitting] = useState(false);
-  const [moderationQueue, setModerationQueue] = useState(null);
-  const [moderatingId, setModeratingId] = useState("");
-  const [uploadFields, setUploadFields] = useState({
-    title: "",
-    author: "",
-    subject: "",
-    track: "PCM",
-    grade: "XI",
-    description: "",
-    license: "CC-BY",
-    rightsConfirmed: false,
-  });
-  const fileInput = useRef(null);
-  const cloudFileInput = useRef(null);
-
+  const [subject, setSubject] = useState("all");
+  const [sourceType, setSourceType] = useState("all");
+  const [sort, setSort] = useState("recommended");
+  const [search, setSearch] = useState(() => new URLSearchParams(location.search).get("q") || "");
+  const [savedOnly, setSavedOnly] = useState(initialSavedOnly);
+  const [visibleCount, setVisibleCount] = useState(12);
   useEffect(() => {
-    let active = true;
-    listPrivateBooks().then((items) => {
-      if (active) setPrivateBooks(items);
-    }).catch((error) => {
-      if (active) setPrivateError(`Could not load PDFs stored on this device: ${error.message}`);
-    });
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => () => {
-    if (reader?.url) URL.revokeObjectURL(reader.url);
-  }, [reader?.url]);
-
-  useEffect(() => {
-    if (!communityApiConfigured) {
-      setCommunityLoading(false);
-      setCommunityError("");
-      return undefined;
-    }
-    let active = true;
-    setCommunityLoading(true);
-    setCommunityError("");
-    setCloudBooks([]);
-    const params = new URLSearchParams({ track, grade: grade === "all" ? "ALL" : grade });
-    communityRequest(`/api/books?${params}`, { user: firebaseUser }).then(({ books: sharedBooks }) => {
-      if (active) setCloudBooks(sharedBooks);
-    }).catch((error) => {
-      if (active) setCommunityError(error.message);
-    }).finally(() => {
-      if (active) setCommunityLoading(false);
-    });
-
-    return () => { active = false; };
-  }, [track, grade, firebaseUser]);
-
-  useEffect(() => {
-    if (!communityApiConfigured || !firebaseUser || firebaseUser.isAnonymous) {
-      setModerationQueue(null);
-      return undefined;
-    }
-    let active = true;
-    communityRequest("/api/admin/books", { user: firebaseUser }).then(({ books: queue }) => {
-      if (active) setModerationQueue(queue);
-    }).catch((error) => {
-      if (active && error.status === 403) setModerationQueue(null);
-      else if (active) setCommunityError(error.message);
-    });
-    return () => { active = false; };
-  }, [firebaseUser]);
-
+    setSearch(new URLSearchParams(location.search).get("q") || "");
+  }, [location.search]);
   const visibleBooks = useMemo(() => {
-    const normalizedQuery = search.trim().toLowerCase();
+    const query = search.trim().toLowerCase();
     return [...publicTextbooks, ...openBooks]
       .filter((book) => belongsToTrack(book, track))
       .filter((book) => grade === "all" || book.level.includes(grade))
+      .filter((book) => subject === "all" || getBookSubjects(book).includes(subject))
+      .filter((book) => sourceType === "all" || (sourceType === "official" ? book.type === "official" : book.type !== "official"))
       .filter((book) => !savedOnly || savedIds.includes(book.id))
-      .filter((book) => !normalizedQuery
-        || [book.title, book.subject, book.publisher, book.description].join(" ").toLowerCase().includes(normalizedQuery));
-  }, [grade, savedIds, savedOnly, search, track]);
-
-  const matchingCloudBooks = cloudBooks.filter((book) => belongsToTrack(book, track)
-    && (grade === "all" || book.grade === grade || book.grade === "SUPPLEMENTAL")
-    && (!search.trim() || `${book.title} ${book.author} ${book.subject}`.toLowerCase().includes(search.trim().toLowerCase())));
-
-  async function handleUpload(event) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    setUploading(true);
-    setPrivateError("");
-    try {
-      const metadata = await savePrivateBook(file);
-      setPrivateBooks((current) => [metadata, ...current]);
-    } catch (error) {
-      setPrivateError(error.message);
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  async function handleOpenPrivateBook(book) {
-    setPrivateError("");
-    try {
-      const fullBook = await getPrivateBook(book.id);
-      setReader({ id: book.id, title: book.title, url: URL.createObjectURL(fullBook.file), ownedBlob: true });
-    } catch (error) {
-      setPrivateError(error.message);
-    }
-  }
-
-  async function handleDeletePrivateBook(book) {
-    if (!window.confirm(`Remove "${book.title}" from this browser? This cannot be undone.`)) return;
-    try {
-      await deletePrivateBook(book.id);
-      setPrivateBooks((current) => current.filter((entry) => entry.id !== book.id));
-      setPrivateError("");
-    } catch (error) {
-      setPrivateError(error.message);
-    }
-  }
-
-  async function handleCommunityUpload(event) {
-    event.preventDefault();
-    const file = cloudFileInput.current?.files?.[0];
-    if (!communityApiConfigured || !firebaseUser || firebaseUser.isAnonymous || !firebaseReady || !file) {
-      setCommunityError(!communityApiConfigured
-        ? "Add the community API URL using the account setup guide before uploading."
-        : !firebaseUser || firebaseUser.isAnonymous
-          ? "Sign in with email or Google before publishing a book."
-          : !firebaseReady
-            ? "Your Firebase sign-in is still connecting."
-            : "Select a PDF to upload.");
-      return;
-    }
-    if (file.size > COMMUNITY_FILE_LIMIT) {
-      setCommunityError(`This PDF is larger than ${formatFileSize(COMMUNITY_FILE_LIMIT)}. Choose a smaller file.`);
-      return;
-    }
-    setCommunitySubmitting(true);
-    setCommunityError("");
-    setCommunityMessage("");
-    try {
-      const body = new FormData();
-      for (const [key, value] of Object.entries(uploadFields)) {
-          if (key === "rightsConfirmed") continue;
-          body.set(key, String(value));
-        }
-        body.set("rightsConfirmed", uploadFields.rightsConfirmed ? "on" : "off");
-      body.set("file", file);
-      const { book } = await communityRequest("/api/books", {
-        user: firebaseUser,
-        method: "POST",
-        body,
-      });
-      setCloudBooks((current) => [{ ...book, canDelete: true }, ...current.filter(({ id }) => id !== book.id)]);
-      setCommunityMessage(`“${book.title}” is safely stored in the shared cloud library and awaiting a license review.`);
-      setUploadFormOpen(false);
-      setUploadFields({ title: "", author: "", subject: "", track, grade: grade === "XI" || grade === "XII" ? grade : "XI", description: "", license: "CC-BY", rightsConfirmed: false });
-      if (cloudFileInput.current) cloudFileInput.current.value = "";
-    } catch (error) {
-      setCommunityError(error.message);
-    } finally {
-      setCommunitySubmitting(false);
-    }
-  }
-
-  async function openCommunityBook(book) {
-    setCommunityError("");
-    try {
-      const headers = book.status === "approved"
-        ? {}
-        : { Authorization: `Bearer ${await firebaseUser.getIdToken()}` };
-      const response = await fetch(book.downloadUrl, { headers });
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(error.error || `Could not open this book (${response.status}).`);
-      }
-      const url = URL.createObjectURL(await response.blob());
-      setReader({ id: book.id, title: book.title, url, ownedBlob: true });
-    } catch (error) {
-      setCommunityError(error.message);
-    }
-  }
-
-  async function removeCommunityBook(book) {
-    if (!window.confirm(`Permanently remove “${book.title}” from the shared cloud library?`)) return;
-    setCommunityError("");
-    try {
-      await communityRequest(`/api/books/${encodeURIComponent(book.id)}`, { user: firebaseUser, method: "DELETE" });
-      setCloudBooks((current) => current.filter(({ id }) => id !== book.id));
-      setCommunityMessage(`“${book.title}” was removed from the cloud library.`);
-    } catch (error) {
-      setCommunityError(error.message);
-    }
-  }
-
-  async function reviewCommunityBook(book, status) {
-    setModeratingId(book.id);
-    setCommunityError("");
-    try {
-      await communityRequest(`/api/admin/books/${encodeURIComponent(book.id)}`, {
-        user: firebaseUser,
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      setModerationQueue((current) => current?.filter(({ id }) => id !== book.id) || []);
-      if (status === "approved") setCloudBooks((current) => current.map((entry) => entry.id === book.id ? { ...entry, status } : entry));
-    } catch (error) {
-      setCommunityError(error.message);
-    } finally {
-      setModeratingId("");
-    }
-  }
-
-  function updateUploadField(event) {
-    const { name, value, checked, type } = event.target;
-    setUploadFields((current) => ({ ...current, [name]: type === "checkbox" ? checked : value }));
-  }
+      .filter((book) => !query || [book.title, ...getBookSubjects(book), book.publisher, book.description]
+        .join(" ").toLowerCase().includes(query))
+      .sort((a, b) => sort === "title" ? a.title.localeCompare(b.title)
+        : sort === "subject" ? a.subject.localeCompare(b.subject) || a.title.localeCompare(b.title)
+          : 0);
+  }, [grade, savedIds, savedOnly, search, sort, sourceType, subject, track]);
+  const displayedBooks = visibleBooks.slice(0, visibleCount);
 
   return (
     <section className="page-wrap books-page" data-reveal>
-      <p className="eyebrow">THE OPEN SHELF · FREE READING, RIGHTFUL SOURCES</p>
-      <div className="page-heading-row"><h1>Good books.<br /><em>One useful shelf.</em></h1>
-        <p>Start with the actual NCERT textbooks, go deeper with legal free books from their publishers, or bring in your own PDFs.</p></div>
+      <p className="eyebrow"><span className="eyebrow-dot" /> THE OPEN SHELF · BOOKS WITH A GOOD SOURCE</p>
+      <div className="page-heading-row"><h1>{savedOnly ? <>Your saved<br /><em>reading.</em></> : <>Find your next<br /><em>good book.</em></>}</h1>
+        <p>{savedOnly ? "A small collection of good places to pick up where you left off." : "Start with the prescribed NCERT books. Then follow your curiosity into open books, courses, and study resources from their sources."}</p></div>
       <div className="book-filters">
-        <div className="track-tabs" role="tablist" aria-label="Filter books by study path">
-          {tracks.map((item) => <button key={item.id} className={`track-tab ${track === item.id ? "is-active" : ""}`}
-            onClick={() => setTrack(item.id)} role="tab" aria-selected={track === item.id}>{item.short}</button>)}
-        </div>
+        <Tabs className="track-tabs" itemClassName="track-tab" label="Filter books by study path"
+          value={track} onChange={setTrack}
+          items={[{ value: "all", label: "ALL" }, ...tracks.map((item) => ({ value: item.id, label: item.short }))]} />
         <label className="grade-filter"><span>CLASS</span><select value={grade} onChange={(event) => setGrade(event.target.value)}>
           <option value="all">XI &amp; XII</option><option value="XI">XI</option><option value="XII">XII</option></select></label>
+        <label className="grade-filter"><span>SUBJECT</span><select value={subject} onChange={(event) => setSubject(event.target.value)}>
+          <option value="all">All subjects</option>{[...new Set([...publicTextbooks, ...openBooks].flatMap(getBookSubjects))].sort().map((name) => <option key={name}>{name}</option>)}</select></label>
+        <label className="grade-filter"><span>SOURCE</span><select value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
+          <option value="all">All sources</option><option value="official">Official sources</option><option value="open">Open / third-party</option></select></label>
+        <label className="grade-filter"><span>SORT</span><select value={sort} onChange={(event) => setSort(event.target.value)}>
+          <option value="recommended">Recommended</option><option value="title">Title A–Z</option><option value="subject">Subject</option></select></label>
         <label className="book-search"><span className="sr-only">Search books</span><input value={search} onChange={(event) => setSearch(event.target.value)}
           type="search" placeholder="Search title or subject" /></label>
         <button className={`saved-only-button ${savedOnly ? "filter-on" : ""}`} onClick={() => setSavedOnly((current) => !current)}>
           {savedOnly ? "Saved only ✳" : `Saved · ${savedIds.length}`}
         </button>
       </div>
-      <div className="catalog-heading"><span>{savedOnly ? "YOUR SAVED BOOKS" : `${tracks.find((item) => item.id === track)?.name} · FREE AND OFFICIAL`}</span>
+      <div className="catalog-heading"><span>{savedOnly ? "YOUR SAVED BOOKS" : `${tracks.find((item) => item.id === track)?.name || "ALL STUDY PATHS"} · CURATED SOURCES`}</span>
         <span>{visibleBooks.length} books</span></div>
       <div className="book-grid">
-        {visibleBooks.map((book, index) => <BookCard key={book.id} book={book}
-          saved={savedIds.includes(book.id)} onToggle={onToggleSaved} style={{ "--card-index": index }} />)}
+        {displayedBooks.map((book, index) => <BookCard key={book.id} book={book} saved={savedIds.includes(book.id)}
+          onToggle={onToggleSaved} style={{ "--card-index": index }} />)}
       </div>
-      {!visibleBooks.length && <div className="empty-state"><span>✳</span><h3>No books in this search.</h3>
-        <p>{savedOnly ? "Save an official book to see it here." : "Try another subject, title, or class."}</p></div>}
-      <section className="community-shelf" data-reveal>
-        <div className="community-heading">
-          <div><p className="eyebrow"><span className="eyebrow-dot" /> THE SHARED LIBRARY · STORED IN THE CLOUD</p>
-            <h2>More good books,<br /><em>from the community.</em></h2></div>
-          <div className="cloud-live-label"><span className={`status-dot ${communityApiConfigured && !communityError ? "status-live" : ""}`} />
-            {communityLoading ? "Connecting to cloud…" : communityApiConfigured ? `${matchingCloudBooks.length} shared PDFs` : "Cloud setup needed"}</div>
+      {visibleBooks.length > displayedBooks.length && <button className="load-more-button" onClick={() => setVisibleCount((count) => count + 12)}>
+        Show more sources · {visibleBooks.length - displayedBooks.length} remaining ↘
+      </button>}
+      {!visibleBooks.length && <EmptyState title={savedOnly ? "Your reading list is ready to grow." : "No books in this search."}>
+        {savedOnly ? "Save a title from the open library and it will be waiting here." : "Try another subject, title, or class."}
+      </EmptyState>}
+      <div className="rights-note"><span>READ IT FROM THE SOURCE</span><p>Study Shelf links to publishers, institutions, and other identified providers; it does not host these resources. Availability and reuse terms vary, especially for third-party study material. Check the source's terms and the current CBSE syllabus before relying on a resource.</p></div>
+    </section>
+  );
+}
+
+function CloudShelfPage({ user, services, firebaseReady }) {
+  const [books, setBooks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState("");
+  const [reader, setReader] = useState(null);
+  const [editingId, setEditingId] = useState("");
+  const [draftTitle, setDraftTitle] = useState("");
+  const fileInput = useRef(null);
+
+  useEffect(() => {
+    let active = true;
+    if (!services || !user || !firebaseReady) return undefined;
+    setLoading(true);
+    services.getDocs(services.query(
+      services.collection(services.db, "users", user.uid, "books"),
+      services.orderBy("createdAt", "desc"),
+    )).then((snapshot) => {
+      if (active) setBooks(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+    }).catch((loadError) => {
+      if (active) setError(`Could not load your cloud shelf: ${loadError.message}`);
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [firebaseReady, services, user]);
+
+  useEffect(() => () => {
+    if (reader?.url) URL.revokeObjectURL(reader.url);
+  }, [reader?.url]);
+
+  async function handleUpload(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) {
+      setError("This PDF is larger than 20 MB. Choose a smaller file.");
+      return;
+    }
+    if (file.type !== "application/pdf") {
+      setError("Choose a PDF file.");
+      return;
+    }
+    const signature = new TextDecoder().decode(await file.slice(0, 5).arrayBuffer());
+    if (signature !== "%PDF-") {
+      setError("This file does not have a valid PDF signature.");
+      return;
+    }
+    if (!services || !firebaseReady) {
+      setError("Your Firebase account is still connecting. Try again shortly.");
+      return;
+    }
+
+    setUploading(true);
+    setProgress(0);
+    setError("");
+    const id = crypto.randomUUID();
+    const storagePath = `users/${user.uid}/books/${id}.pdf`;
+    const fileRef = services.ref(services.storage, storagePath);
+    try {
+      const task = services.uploadBytesResumable(fileRef, file, { contentType: "application/pdf" });
+      await new Promise((resolve, reject) => {
+        task.on("state_changed", (snapshot) => {
+          setProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
+        }, reject, resolve);
+      });
+      const title = file.name.replace(/\.pdf$/i, "").trim().slice(0, 180) || "Untitled PDF";
+      const metadata = {
+        title,
+        originalName: file.name.slice(0, 255),
+        size: file.size,
+        contentType: "application/pdf",
+        storagePath,
+        createdAt: new Date(),
+      };
+      try {
+        await services.setDoc(services.doc(services.db, "users", user.uid, "books", id), {
+          ...metadata,
+          createdAt: services.serverTimestamp(),
+        });
+      } catch (metadataError) {
+        try {
+          await services.deleteObject(fileRef);
+        } catch (cleanupError) {
+          throw new Error(`${metadataError.message} The uploaded file could not be cleaned up: ${cleanupError.message}`);
+        }
+        throw metadataError;
+      }
+      setBooks((current) => [{ id, ...metadata }, ...current]);
+    } catch (uploadError) {
+      setError(`Upload failed: ${uploadError.message}`);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function openBook(book) {
+    if (!services) return;
+    setError("");
+    try {
+      const bytes = await services.getBytes(services.ref(services.storage, book.storagePath), 20 * 1024 * 1024);
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      setReader({ title: book.title, url });
+    } catch (readError) {
+      setError(`Could not open this private PDF: ${readError.message}`);
+    }
+  }
+
+  async function removeBook(book) {
+    if (!window.confirm(`Permanently remove "${book.title}" from your Firebase account? This cannot be undone.`)) return;
+    if (!services) return;
+    setError("");
+    const fileRef = services.ref(services.storage, book.storagePath);
+    try {
+      try {
+        await services.deleteObject(fileRef);
+      } catch (storageError) {
+        if (storageError.code !== "storage/object-not-found") throw storageError;
+      }
+      await services.deleteDoc(services.doc(services.db, "users", user.uid, "books", book.id));
+      setBooks((current) => current.filter((entry) => entry.id !== book.id));
+    } catch (removeError) {
+      setError(`Could not completely remove this PDF: ${removeError.message}`);
+    }
+  }
+
+  async function renameBook(event, book) {
+    event.preventDefault();
+    const title = draftTitle.trim().slice(0, 180);
+    if (!title) {
+      setError("Enter a title for this PDF.");
+      return;
+    }
+    try {
+      await services.updateDoc(services.doc(services.db, "users", user.uid, "books", book.id), { title });
+      setBooks((current) => current.map((entry) => entry.id === book.id ? { ...entry, title } : entry));
+      setEditingId("");
+      setError("");
+    } catch (renameError) {
+      setError(`Could not rename this PDF: ${renameError.message}`);
+    }
+  }
+
+  return (
+    <section className="page-wrap cloud-shelf-page" data-reveal>
+      <p className="eyebrow"><span className="eyebrow-dot" /> YOUR PRIVATE LIBRARY · FIREBASE CLOUD</p>
+      <div className="page-heading-row"><h1>Your books.<br /><em>Wherever you are.</em></h1>
+        <p>PDFs in this shelf are private to your account and available on your signed-in devices. Original files are kept as uploaded.</p></div>
+      <section className="cloud-shelf-panel">
+        <p className="cloud-storage-cost-note">Optional: private PDF storage requires Firebase's billing-enabled Blaze plan. Check current pricing and quotas before uploading; no-cost allowances are not a spending cap.</p>
+        <div className="cloud-shelf-toolbar"><div><p className="eyebrow">PERSONAL FILES · PRIVATE BY DEFAULT</p>
+          <h2>A place for your own<br /><em>reading.</em></h2></div>
+          <div><button className="hero-cta" onClick={() => fileInput.current?.click()} disabled={!firebaseReady || uploading}>
+            {uploading ? `Uploading ${progress}%` : "Add a PDF"} <span aria-hidden="true">＋</span></button>
+            <input ref={fileInput} className="sr-only" type="file" accept=".pdf,application/pdf" onChange={handleUpload} />
+            <p className="cloud-shelf-limit">PDF · up to 20 MB each</p></div>
         </div>
-        <p className="community-intro">Find openly licensed books shared by learners. Sign in to publish PDFs that you have explicit permission to redistribute; every upload is reviewed before anyone else can download it.</p>
-        {communityError && <p className="community-error" role="alert">{communityError}</p>}
-        {communityMessage && <p className="community-success" role="status">{communityMessage}</p>}
-        {!communityApiConfigured && <div className="community-connect-card">
-          <div><strong>Connect a private cloud catalog.</strong><p>The app is ready, but this deployment has no Cloudflare Worker URL yet. Set up a free Worker + private R2 bucket + D1 catalog, then add <code>VITE_COMMUNITY_API_URL</code> as a GitHub Actions variable and redeploy.</p></div>
-          <a href="#/account">Open cloud setup guide ↗</a>
-        </div>}
-        {communityApiConfigured && !firebaseUser && <div className="community-connect-card">
-          <div><strong>Browse the public shelf. Sign in to share.</strong><p>Anyone can read approved community books. Sign in with email or Google to upload, manage your books, and help moderate your library.</p></div>
-          <button onClick={onSignIn}>Sign in to contribute ↗</button>
-        </div>}
-        {communityApiConfigured && firebaseUser?.isAnonymous && <div className="community-connect-card">
-          <div><strong>Make a free account to publish.</strong><p>Shared-book uploads require email or Google sign-in. Your existing anonymous study progress will be kept when you link your account.</p></div>
-          <button onClick={onSignIn}>Secure my shelf ↗</button>
-        </div>}
-        {communityApiConfigured && firebaseUser && !firebaseUser.isAnonymous && <div className="community-action-row">
-          <div><span className="cloud-badge">☁ COMMUNITY UPLOAD</span>
-            <p>Your PDFs go to private cloud storage; only approved books become public.</p></div>
-          <button className="hero-cta community-upload-button" onClick={() => setUploadFormOpen((current) => !current)}>
-            {uploadFormOpen ? "Close upload form" : "Share a permitted book"} <span aria-hidden="true">{uploadFormOpen ? "×" : "↗"}</span>
-          </button>
-        </div>}
-        {uploadFormOpen && firebaseUser && <form className="community-upload-form" onSubmit={handleCommunityUpload}>
-          <p className="eyebrow">01 — CREDIT THE SOURCE &amp; EXPLAIN THE LICENSE</p>
-          <div className="community-form-grid">
-            <label>Book title<input name="title" value={uploadFields.title} onChange={updateUploadField} maxLength={140} required /></label>
-            <label>Author / attribution<input name="author" value={uploadFields.author} onChange={updateUploadField} maxLength={140} required /></label>
-            <label>Subject<input name="subject" value={uploadFields.subject} onChange={updateUploadField} maxLength={80} required placeholder="e.g. Mathematics" /></label>
-            <label>Study stream<select name="track" value={uploadFields.track} onChange={updateUploadField}>
-              {tracks.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-            <label>Class<select name="grade" value={uploadFields.grade} onChange={updateUploadField}>
-              <option value="XI">Class XI</option><option value="XII">Class XII</option><option value="SUPPLEMENTAL">Supplemental / other</option>
-            </select></label>
-            <label>Redistribution license<select name="license" value={uploadFields.license} onChange={updateUploadField}>
-              <option value="CC-BY">Creative Commons BY · attribution required</option>
-              <option value="CC-BY-SA">Creative Commons BY-SA · share alike</option>
-              <option value="PUBLIC-DOMAIN">Public domain</option>
-              <option value="OER">Other explicitly redistributable OER</option>
-            </select></label>
-            <label className="upload-description-field">Source &amp; description<textarea name="description" value={uploadFields.description} onChange={updateUploadField}
-              placeholder="Explain where this file came from and how its license permits public sharing." maxLength={500} required /></label>
-          </div>
-          <label className="cloud-file-picker"><span>Choose a PDF · max {formatFileSize(COMMUNITY_FILE_LIMIT)}</span>
-            <input ref={cloudFileInput} type="file" accept=".pdf,application/pdf" required /></label>
-          <label className="rights-confirmation"><input type="checkbox" name="rightsConfirmed" checked={uploadFields.rightsConfirmed} onChange={updateUploadField} />
-            <span>I have the legal right to upload and share this exact PDF with the public. Its license explicitly permits public redistribution.</span></label>
-          <p className="community-license-warning">Uploaded PDFs are stored in the shared cloud and anyone can download an approved book. Choose an allowed license and credit the original author and source. Do not upload a textbook, scan, or personal copy unless its exact license explicitly permits redistribution.</p>
-          <button type="submit" className="experiment-run" disabled={communitySubmitting || !firebaseReady || !uploadFields.rightsConfirmed}>
-            {communitySubmitting ? "Uploading securely to the cloud…" : "Upload to the cloud for review ↗"}
-          </button>
-        </form>}
-        {communityApiConfigured && communityLoading && <div className="community-loading">Connecting securely to the shared bookshelf…</div>}
-        {communityApiConfigured && !communityLoading && matchingCloudBooks.length > 0 && <div className="community-book-grid">
-          {matchingCloudBooks.map((book, index) => {
-              const isPending = book.status !== "approved";
-              return <article className={`community-book-card ${isPending ? "is-pending" : ""}`} key={book.id} style={{ "--card-index": index }}>
-                <div className={`community-cover community-cover-${index % 4}`}><span>THE COMMUNITY SHELF</span>
-                  <strong>{book.title}</strong><i>✳</i><small>{book.license} · {formatFileSize(book.fileSize)}</small></div>
-                <div className="community-book-info"><div><span>{book.subject} · {book.grade}</span>
-                  <span className={`community-status-badge ${book.status}`}>{book.status === "approved" ? "PUBLIC · CLOUD STORED" : `YOUR BOOK · ${book.status.toUpperCase()}`}</span></div>
-                  <h3>{book.title}</h3><p className="book-author">By {book.author}</p>
-                  <p>{book.description}</p><small>Shared {new Date(book.createdAt).toLocaleDateString()}</small>
-                  <div className="community-book-actions">{!isPending
-                    ? <a href={book.downloadUrl} target="_blank" rel="noreferrer">Read / download PDF ↗</a>
-                    : <button onClick={() => openCommunityBook(book)} disabled={book.status === "rejected"}>{book.status === "rejected" ? "Review rejected" : "Preview my PDF ↗"}</button>}
-                    {book.canDelete && <button className="private-delete" onClick={() => removeCommunityBook(book)}>Remove from cloud</button>}
-                  </div>
-                </div>
-              </article>;
-          })}
-        </div>}
-        {communityApiConfigured && !communityLoading && matchingCloudBooks.length === 0
-          && <div className="private-empty">{cloudBooks.length > 0
-            ? "No cloud books match this stream, class, and search yet."
-            : "The cloud shelf is waiting for its first licensed books. Want to contribute?"}</div>}
-        {Array.isArray(moderationQueue) && <section className="moderation-queue">
-          <div className="moderation-heading"><p className="eyebrow">MODERATOR DESK · REVIEW BEFORE PUBLISHING</p><span>{moderationQueue.length} awaiting review</span></div>
-          {!moderationQueue.length && <p>The cloud shelf is up to date. No pending book reviews.</p>}
-          {moderationQueue.map((book) => <article className="moderation-row" key={book.id}>
-            <div><strong>{book.title}</strong><span>By {book.author} · {book.subject} · {book.license} · {formatFileSize(book.fileSize)}</span>
-              <p>{book.description}</p></div>
-            <button onClick={() => openCommunityBook(book)}>Inspect PDF</button>
-            <button disabled={moderatingId === book.id} onClick={() => reviewCommunityBook(book, "approved")}>Approve</button>
-            <button className="private-delete" disabled={moderatingId === book.id} onClick={() => reviewCommunityBook(book, "rejected")}>Reject</button>
-          </article>)}
-        </section>}
+        {uploading && <div className="cloud-upload-progress" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100">
+          <span style={{ width: `${progress}%` }} /></div>}
+        {error && <p className="private-error" role="alert">{error}</p>}
+        {loading ? <Skeleton className="shelf-skeleton" lines={3} />
+          : books.length === 0 ? <EmptyState title="Your cloud shelf is empty.">Add a PDF you own or are authorized to store.</EmptyState>
+            : <div className="private-book-list">{books.map((book) => (
+              <article className="private-book-row" key={book.id}><span className="private-pdf-mark">PDF</span>
+                <div className="private-book-title">{editingId === book.id
+                  ? <form className="pdf-rename-form" onSubmit={(event) => renameBook(event, book)}>
+                    <label className="sr-only" htmlFor={`pdf-title-${book.id}`}>PDF title</label>
+                    <input id={`pdf-title-${book.id}`} value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} maxLength={180} autoFocus />
+                    <button type="submit">Save</button><button type="button" onClick={() => setEditingId("")}>Cancel</button>
+                  </form>
+                  : <strong>{book.title}</strong>}
+                  <small>{(book.size / (1024 * 1024)).toFixed(2)} MB · {new Date(book.createdAt?.toDate ? book.createdAt.toDate() : book.createdAt || Date.now()).toLocaleDateString()}</small></div>
+                <button onClick={() => openBook(book)}>Read ↗</button>
+                <button onClick={() => { setEditingId(book.id); setDraftTitle(book.title); }} aria-label={`Rename ${book.title}`}>Rename</button>
+                <button onClick={() => removeBook(book)} aria-label={`Delete ${book.title}`} className="private-delete">Remove</button>
+              </article>
+            ))}</div>}
+        <p className="cloud-shelf-footnote">Files are stored in your Firebase Storage bucket. Never upload a book unless you have permission to store it.</p>
       </section>
-      <div className="rights-note"><span>READ IT FROM THE SOURCE</span><p>Official NCERT textbooks open the NCERT textbook portal: choose a class, subject, and title there to download its PDF. OpenStax links open the publisher page with its own online reader and free PDF. Their books are helpful supplements, not a substitute for the CBSE syllabus.</p></div>
-      <details className="private-library private-library-collapsible">
-        <summary><div><p className="eyebrow">LOCAL BACKUP · THIS BROWSER ONLY</p><strong>A private shelf for personal books</strong></div><span aria-hidden="true">＋</span></summary>
-        <div className="private-library-content">
-        <div className="private-library-heading"><div><p className="eyebrow">YOUR PRIVATE COPIES · THIS BROWSER ONLY</p>
-          <h2>Bring your own<br /><em>reading.</em></h2></div>
-          <button className="hero-cta" onClick={() => fileInput.current?.click()} disabled={uploading}>
-            {uploading ? "Adding PDF…" : "Add a PDF"} <span aria-hidden="true">＋</span></button>
-          <input ref={fileInput} className="sr-only" type="file" accept=".pdf,application/pdf" onChange={handleUpload} />
-        </div>
-        <p className="private-explanation">Your PDF stays on this device in your browser’s private database. It is not uploaded to the website, cloud, or shared with other visitors. Maximum size: {MAX_PRIVATE_BOOK_BYTES / 1024 / 1024} MB per file. A copy elsewhere is still a good idea.</p>
-        {privateError && <p className="private-error" role="alert">{privateError}</p>}
-        {privateBooks.length === 0 ? <div className="private-empty">Your private shelf is empty. Add a PDF that you own or have permission to use.</div> : (
-          <div className="private-book-list">{privateBooks.map((book) => (
-            <div className="private-book-row" key={book.id}><span className="private-pdf-mark">PDF</span>
-              <div className="private-book-title"><strong>{book.title}</strong><small>{(book.size / (1024 * 1024)).toFixed(2)} MB · saved only in this browser</small></div>
-              <button onClick={() => handleOpenPrivateBook(book)}>Read ↗</button>
-              <button onClick={() => handleDeletePrivateBook(book)} aria-label={`Delete ${book.title}`} className="private-delete">Remove</button>
-            </div>
-          ))}</div>
-        )}
-        </div>
-      </details>
-      {!firebaseUser && firebaseConfigured && <div className="account-nudge"><span>SYNC YOUR READING LIST</span><p>Bookmarks and study progress sync across your signed-in devices. Private PDF files remain on this browser.</p>
-        <button onClick={onSignIn}>Sign in ↗</button></div>}
-      {!firebaseConfigured && <p className="curriculum-caution">Bookmarks are stored on this browser until Firebase is configured. <a href="#/account">See account setup ↗</a></p>}
-      {reader && <div className="reader-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) { URL.revokeObjectURL(reader.url); setReader(null); } }}>
+      {reader && <div className="reader-backdrop" role="presentation" onClick={(event) => {
+        if (event.target === event.currentTarget) { URL.revokeObjectURL(reader.url); setReader(null); }
+      }}>
         <section className="pdf-reader" role="dialog" aria-modal="true" aria-labelledby="reader-title">
-          <header><h2 id="reader-title">{reader.title}</h2>          <a href={reader.url} download={reader.ownedBlob ? `${reader.title}.pdf` : undefined} target={reader.ownedBlob ? undefined : "_blank"}
-            rel={reader.ownedBlob ? undefined : "noreferrer"}>Open / download PDF ↗</a>
-            <button onClick={() => { if (reader.ownedBlob) URL.revokeObjectURL(reader.url); setReader(null); }} aria-label="Close PDF reader">×</button></header>
+          <header><h2 id="reader-title">{reader.title}</h2><a href={reader.url} download={`${reader.title}.pdf`}>Download PDF ↗</a>
+            <button onClick={() => { URL.revokeObjectURL(reader.url); setReader(null); }} aria-label="Close PDF reader">×</button></header>
           <iframe title={`PDF reader: ${reader.title}`} src={reader.url} />
         </section></div>}
     </section>
   );
 }
 
-function AuthDialog({ services, currentUser, onClose }) {
-  const [mode, setMode] = useState(currentUser?.isAnonymous ? "upgrade" : "signin");
+function AuthDialog({ services, currentUser, onClose, onAuthenticated = onClose, initialMode = "signin" }) {
+  const [mode, setMode] = useState(currentUser?.isAnonymous ? "upgrade" : initialMode);
   const upgrading = currentUser?.isAnonymous;
   const dialogRef = useRef(null);
   const [email, setEmail] = useState("");
@@ -869,10 +803,10 @@ function AuthDialog({ services, currentUser, onClose }) {
           )
           : await services.createUserWithEmailAndPassword(services.auth, email, password);
         if (displayName.trim()) await services.updateProfile(credential.user, { displayName: displayName.trim() });
-        onClose();
+        onAuthenticated();
       } else if (mode === "signin") {
         await services.signInWithEmailAndPassword(services.auth, email, password);
-        onClose();
+        onAuthenticated();
       } else {
         await services.sendPasswordResetEmail(services.auth, email);
         setNotice("If an account exists for this address, a password-reset link is on its way.");
@@ -887,7 +821,7 @@ function AuthDialog({ services, currentUser, onClose }) {
         "auth/too-many-requests": "Too many attempts. Wait a little, then try again.",
         "auth/operation-not-allowed": "Enable Email/Password sign-in in Firebase Authentication first.",
         "auth/popup-blocked": "Allow pop-ups for this site and try Google sign-in again.",
-        "auth/unauthorized-domain": "Add this GitHub Pages domain to Firebase's authorised domains.",
+        "auth/unauthorized-domain": "Add this Firebase Hosting domain to Authentication's authorized domains.",
       };
       setError(friendlyErrors[authError.code] || `Could not complete sign-in: ${authError.message}`);
     } finally {
@@ -903,10 +837,10 @@ function AuthDialog({ services, currentUser, onClose }) {
       const provider = new services.GoogleAuthProvider();
       if (currentUser?.isAnonymous) await services.linkWithPopup(currentUser, provider);
       else await services.signInWithPopup(services.auth, provider);
-      onClose();
+      onAuthenticated();
     } catch (authError) {
       setError(authError.code === "auth/unauthorized-domain"
-        ? "Add this GitHub Pages domain to Firebase's authorised domains."
+        ? "Add this Firebase Hosting domain to Authentication's authorized domains."
         : `Google sign-in failed: ${authError.message}`);
     } finally {
       setBusy(false);
@@ -921,7 +855,7 @@ function AuthDialog({ services, currentUser, onClose }) {
         <h2 id="auth-heading">{mode === "signup" || mode === "upgrade"
           ? upgrading ? "Save your anonymous shelf." : "Make room to grow."
           : mode === "reset" ? "A fresh start." : "Welcome back."}</h2>
-        <p className="auth-intro">Sign in to sync bookmarks and topic progress across devices. Personal imports stay in this browser; community PDFs are shared only after moderation.</p>
+        <p className="auth-intro">Save books, keep your study progress in sync, and open a private workspace for your own permitted PDF files.</p>
         {mode !== "reset" && <button className="google-sign-in" onClick={handleGoogleSignIn} disabled={busy || !services}>
           <span aria-hidden="true">G</span> {upgrading ? "Link Google to your shelf" : "Continue with Google"}</button>}
         {mode !== "reset" && <div className="auth-separator"><span>OR WITH EMAIL</span></div>}
@@ -937,7 +871,7 @@ function AuthDialog({ services, currentUser, onClose }) {
           {notice && <p className="auth-success" role="status">{notice}</p>}
           {mode === "upgrade" && <label>Password<input value={password} onChange={(event) => setPassword(event.target.value)}
             type="password" autoComplete="new-password" minLength={6} required /></label>}
-          <button className="experiment-run" type="submit" disabled={busy || !firebaseConfigured}>{busy ? "One moment…" : mode === "signup" ? "Create your free account" : mode === "upgrade" ? "Link and save my shelf" : mode === "reset" ? "Send reset link" : "Sign in"}</button>
+          <button className="primary-submit" type="submit" disabled={busy || !firebaseConfigured}>{busy ? "One moment…" : mode === "signup" ? "Create your free account" : mode === "upgrade" ? "Link and save my shelf" : mode === "reset" ? "Send reset link" : "Sign in"}</button>
         </form>
         <div className="auth-switches">
           {mode === "signin" && <><button onClick={() => { setMode("reset"); setError(""); setNotice(""); }}>Forgot password?</button>
@@ -946,83 +880,404 @@ function AuthDialog({ services, currentUser, onClose }) {
             {!upgrading && <button onClick={() => { setMode("signin"); setError(""); setNotice(""); }}>Sign in</button>}</>}
           {mode === "reset" && <button onClick={() => { setMode("signin"); setError(""); setNotice(""); }}>Back to sign in</button>}
         </div>
-        {!firebaseConfigured && <p className="auth-setup-note">This site is not connected to Firebase yet. Follow the free setup guide on the account page.</p>}
+        {!firebaseConfigured && <p className="auth-setup-note">This site is not connected to Firebase yet. Follow SETUP.md in the project source, then add your web-app configuration to the ignored .env.local file.</p>}
       </section>
     </div>
   );
 }
 
-function AccountPage({ user, firebaseReady, onSignIn, onSignOut, onSyncRetry }) {
+function AccountPage({ user, firebaseReady, onSignOut, onSyncRetry, theme, setTheme, onDeleteAccount }) {
+  const { trackFilter, setTrackFilter, persistProfile, updateDisplayName } = useStudy();
+  const [name, setName] = useState(user?.displayName || "");
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [password, setPassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  async function saveProfile(event) {
+    event.preventDefault();
+    setStatus("");
+    setError("");
+    try {
+      if (name.trim() !== (user.displayName || "")) {
+        await updateDisplayName(name.trim());
+      }
+      setStatus("Your profile details are saved.");
+    } catch (saveError) {
+      setError(`Could not update your profile: ${saveError.message}`);
+    }
+  }
+
+  async function confirmDeleteAccount(event) {
+    event.preventDefault();
+    if (!window.confirm("Permanently delete your Study Shelf account, saved books, progress, and PDFs? This cannot be undone.")) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await onDeleteAccount(password);
+    } catch (deleteError) {
+      setError(`Account deletion did not complete: ${deleteError.message}`);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <section className="page-wrap account-page">
-      <p className="eyebrow">YOUR SHELF · A PRIVATE LITTLE CORNER</p>
-      <div className="page-heading-row"><h1>It’s your<br /><em>space to learn.</em></h1>
-        <p>A free account saves your bookmarks and topic checklist on this device and syncs them between your signed-in devices.</p></div>
-      {user && !user.isAnonymous ? <div className="account-status-card"><span className="account-avatar">{(user.displayName || user.email || "S").slice(0, 1).toUpperCase()}</span>
-        <div><span>SIGNED IN</span><h2>{user.displayName || user.email}</h2><p>{user.email}</p><small>{firebaseReady ? "Your bookmarks and topic progress are synced." : "Syncing your reading list…"}</small></div>
+      <p className="eyebrow"><span className="eyebrow-dot" /> YOUR ACCOUNT · YOUR SETTINGS</p>
+      <div className="page-heading-row"><h1>Your account.<br /><em>Your own pace.</em></h1>
+        <p>Manage your sign-in and see what is connected to your private Study Shelf.</p></div>
+      <div className="account-status-card"><span className="account-avatar">{(user?.displayName || user?.email || "S").slice(0, 1).toUpperCase()}</span>
+        <div><span>SIGNED IN</span><h2>{user?.displayName || user?.email}</h2><p>{user?.email}</p>
+          <small>{firebaseReady ? "Your study profile is connected to Firebase." : "Connecting your account…"}</small></div>
         <button onClick={onSignOut}>Sign out</button></div>
-        : <div className="account-status-card"><span className="account-avatar">s.</span><div><span>GUEST SHELF</span>
-          <h2>{firebaseConfigured ? "Your local shelf is ready." : "Firebase isn’t connected yet."}</h2>
-          <p>Without Firebase config, your bookmarks and progress stay in this browser.</p></div>
-          {firebaseConfigured && <button onClick={onSignIn}>{user?.isAnonymous ? "Secure your old shelf ↗" : "Sign in ↗"}</button>}</div>}
-      <section className="setup-guide"><p className="eyebrow">NO SUBSCRIPTION REQUIRED · YOUR FIREBASE PROJECT</p>
-        <h2>Turn on free accounts and syncing.</h2>
-        <p>GitHub Pages hosts the public website for free. Firebase Spark provides Google or email sign-in and a small free Firestore quota for bookmarks and checklists. This app never uploads PDFs to Firebase.</p>
-        <ol>
-          <li>Create a Firebase project on the <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer">Firebase Console ↗</a>. Do not enable billing.</li>
-          <li>In <strong>Project settings → General → Your apps</strong>, add a Web app and copy its six config values.</li>
-          <li>Copy <code>.env.example</code> to <code>.env.local</code> in the project root and fill in the values. Keep <code>.env.local</code> out of GitHub.</li>
-          <li>In <strong>Authentication → Sign-in method</strong>, enable <strong>Email/Password</strong> and <strong>Google</strong>.</li>
-          <li>In <strong>Authentication → Settings → Authorised domains</strong>, add <code>YOUR-USERNAME.github.io</code>.</li>
-          <li>Create a <strong>Firestore Database</strong> in test-free production mode. Publish this project’s <code>firestore.rules</code> from Firebase CLI using <code>firebase deploy --only firestore:rules</code>.</li>
-          <li>Restart local Vite with <code>npm run dev</code>. Vite environment values are embedded at build time; rebuild and redeploy after changing them.</li>
-        </ol>
-        <div className="free-quota-note"><strong>Keep it free:</strong> Stay on the Spark plan; no billing account or Cloud Storage bucket is needed. Firebase’s free quotas are limited and can change. Firestore is used only for signed-in users’ text-based bookmarks and topic IDs. If a quota is reached, your local reading still works.</div>
-        <button className="account-retry" onClick={onSyncRetry}>Retry Firebase connection ↗</button>
-      </section>
-      <section className="setup-guide upload-guide"><p className="eyebrow">SHARE A BOOK YOU OWN</p><h2>Where your book files go.</h2>
-        <p><strong>Share with everyone through the cloud:</strong> connect the free-tier Cloudflare Worker + private R2 bucket + D1 catalog below. Sign in, submit the title and source, and upload a permitted PDF from the Books page. Each file stays private until a moderator approves it.</p>
-        <p><strong>Private:</strong> use the Library page’s Add a PDF button. It is stored in this browser and never published. It will not sync to another device.</p>
-        <p><strong>Publish a free book for every visitor:</strong> only upload a book when its license permits public redistribution. Add the PDF to <code>public/books/</code> in your repository, then add a book entry to <code>src/books.js</code>. Commit and push to deploy it. Anyone can read or download files in that folder.</p>
-        <p>Do not publicly upload copyrighted textbooks or personal copies. The NCERT and OpenStax book links already provide their own authorized reader and PDF downloads.</p>
-        <a className="manifesto-link" href="#/library">Go to the bookshelf <span>↗</span></a>
-      </section>
-      <section className="setup-guide cloud-setup-guide" id="cloud-setup" data-reveal>
-        <p className="eyebrow"><span className="eyebrow-dot" /> FREE-TIER CLOUD BOOK SHARING</p>
-        <h2>Put the library in the cloud.</h2>
-        <p>GitHub Pages serves the app; Firebase confirms accounts; Cloudflare stores the PDFs and book records. The R2 bucket stays private: the Worker streams approved books to readers, checks sign-in for private previews, and queues every upload for moderator review.</p>
-        <div className="free-quota-note"><strong>Before you start:</strong> Create a free Cloudflare account and stay within the current Workers, D1 and R2 free allowances. Free quotas and eligibility can change and are not unlimited; review Cloudflare’s current pricing and usage before uploading. Do not enable billing unless you explicitly choose to. PDFs are public once approved. Never upload copyrighted scans, textbooks, or personal copies without redistribution rights.</div>
-        <ol className="cloud-setup-steps">
-          <li><strong>Install the project tools.</strong> In the project folder run <code>npm install</code>, then log in: <code>npx wrangler login</code>. Cloudflare opens an official sign-in page in your browser.</li>
-          <li><strong>Create the private PDF bucket.</strong> Run <code>npm run cloud:r2:create</code>. Do not enable a public R2 development URL or add an R2 public custom domain.</li>
-          <li><strong>Create the catalog database.</strong> Run <code>npm run cloud:d1:create</code>. Copy the database ID from the output into <code>database_id</code> in <code>cloudflare/wrangler.toml</code>.</li>
-          <li><strong>Create the catalog tables.</strong> With the database ID in place, run <code>npm run cloud:d1:init</code>. This applies <code>cloudflare/schema.sql</code> to the remote D1 database.</li>
-          <li><strong>Configure your Firebase project.</strong> Set <code>FIREBASE_PROJECT_ID</code> in <code>cloudflare/wrangler.toml</code> to the same project ID as <code>VITE_FIREBASE_PROJECT_ID</code>. In <code>ALLOWED_ORIGINS</code>, replace <code>https://YOUR-USERNAME.github.io</code> with your exact Pages origin (origin only: no repository path or trailing slash). Keep the localhost entries for development. If you have a custom domain, add its exact origin.</li>
-          <li><strong>Choose a moderator.</strong> Sign in to your site at least once with that Firebase account. In Firebase Console → Authentication → Users, copy its UID. Run <code>npx wrangler secret put ADMIN_UIDS --config cloudflare/wrangler.toml</code>, paste the UID, and press Enter. To appoint more moderators, enter comma-separated UIDs. Keep this secret private; do not put moderator UIDs in <code>VITE_</code> settings.</li>
-          <li><strong>Deploy the cloud API.</strong> Run <code>npm run cloud:deploy</code>. Wrangler prints the Worker URL, such as <code>https://study-shelf-community.YOUR-ACCOUNT.workers.dev</code>.</li>
-          <li><strong>Connect the website.</strong> Add the complete Worker URL (without a trailing slash) as <code>VITE_COMMUNITY_API_URL</code> in GitHub → repository Settings → Secrets and variables → Actions → Variables. Add the same line to your local <code>.env.local</code> for local app development. Keep the six Firebase browser config variables there too. These browser config values are public; the moderator secret is not.</li>
-          <li><strong>Publish and verify.</strong> Push a commit to the GitHub Pages branch so Actions rebuilds with the Worker URL. Then open <code>{communityApiUrl || "YOUR-WORKER-URL"}/api/health</code> in a new tab; seeing <code>{"{\"status\":\"ok\",\"feature\":\"community-books\""}</code> confirms the API is reachable. Return to Books to browse, publish, and moderate books.</li>
-        </ol>
-        <div className="free-quota-note"><strong>Moderation matters:</strong> Cloud upload does not give permission to share a book. Review its original publisher’s license and source before approving it. The uploader confirms their rights; moderators must still verify them. Reject/delete an upload instead of publishing when its rights are unclear.</div>
-        <p className="community-connect-link">Worker configuration lives in <code>cloudflare/wrangler.toml</code>; the access-controlled API is in <code>cloudflare/worker.js</code>, with D1 tables in <code>cloudflare/schema.sql</code>. Never make the R2 bucket public. The Worker validates Firebase ID-token signatures and does not use a browser-visible service-account key.</p>
-        <a className="manifesto-link" href="#/library">Open the shared bookshelf <span>↗</span></a>
-      </section>
+      <form className="settings-card" onSubmit={saveProfile}>
+        <p className="eyebrow">PERSONALIZE YOUR SPACE</p><h2>Make it feel like yours.</h2>
+        <Input label="Display name" value={name} onChange={(event) => setName(event.target.value)} maxLength={70} autoComplete="name" />
+        <label>Preferred study path<select value={tracks.some((track) => track.id === trackFilter) ? trackFilter : "PCM"}
+          onChange={(event) => {
+            const nextStream = event.target.value;
+            setTrackFilter(nextStream);
+            void persistProfile({ preferredStream: nextStream });
+          }}>
+          {tracks.map((track) => <option value={track.id} key={track.id}>{track.name}</option>)}
+        </select></label>
+        <div className="settings-theme"><span>Reading atmosphere</span>
+          <ThemeToggle theme={theme} onChange={setTheme} /></div>
+        {error && <p className="auth-error" role="alert">{error}</p>}
+        {status && <p className="auth-success" role="status">{status}</p>}
+        <button type="submit" className="primary-submit">Save display name</button>
+      </form>
+      <div className="account-destination-grid">
+        <Link to="/dashboard"><span>01 / YOUR SPACE</span><strong>Workspace ↗</strong></Link>
+        <Link to="/dashboard/shelf"><span>02 / YOUR BOOKS</span><strong>Private cloud shelf ↗</strong></Link>
+        <Link to="/dashboard/progress"><span>03 / YOUR PROGRESS</span><strong>Study map ↗</strong></Link>
+      </div>
+      <button className="account-retry" onClick={onSyncRetry}>Retry Firebase connection ↗</button>
+      <p className="curriculum-caution">Your files and learning progress are protected by this project's Firebase security rules. To review deployment and storage setup, open <strong>SETUP.md</strong> in the project source.</p>
+      <details className="account-delete">
+        <summary>Delete my account and data</summary>
+        <form onSubmit={confirmDeleteAccount}>
+          <p>Deletion removes your saved reading list, topic progress, PDF files, and Firebase sign-in. Firebase may ask you to sign in again before it permits this sensitive action.</p>
+          {user?.providerData?.some((provider) => provider.providerId === "password") &&
+            <label>Confirm with your password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>}
+          {user?.providerData?.some((provider) => provider.providerId === "google.com") &&
+            <p>Google accounts will confirm their identity in a Google sign-in window.</p>}
+          <button className="account-delete-button" type="submit" disabled={deleting}>{deleting ? "Deleting account…" : "Permanently delete account"}</button>
+        </form>
+      </details>
     </section>
   );
 }
 
+function PageIntro({ eyebrow, title, description }) {
+  return <section className="info-hero page-wrap" data-reveal>
+    <p className="eyebrow"><span className="eyebrow-dot" /> {eyebrow}</p>
+    <h1>{title}</h1>
+    <p>{description}</p>
+  </section>;
+}
+
+function InfoPage({ kind }) {
+  const content = {
+    about: {
+      eyebrow: "WHY THIS SHELF EXISTS",
+      title: <>A little more room<br /><em>to understand.</em></>,
+      description: "Study Shelf brings trusted reading, a calm study map, and your own learning space together—without pretending that learning can be reduced to a streak.",
+      sections: [
+        ["Find a reliable starting point", "Discover official NCERT textbooks and books that their publishers make openly available. Each reading link takes you to the source."],
+        ["Keep a thread, not a score", "Save titles and use the syllabus checklist to remember where you want to return. Your progress is personal, and it is not an exam prediction."],
+        ["Keep private files private", "The optional PDF shelf is for documents you own or have permission to store. Files are restricted to the signed-in account by Firebase rules."],
+      ],
+    },
+    privacy: {
+      eyebrow: "CLEAR BY DESIGN",
+      title: <>Your study life<br /><em>belongs to you.</em></>,
+      description: "Study Shelf uses Firebase for account and cloud features. Review the following data practices before creating an account or uploading a file.",
+      sections: [
+        ["Account and profile", "Firebase Authentication processes sign-in details. Firestore stores a signed-in user’s saved book identifiers, completed topic identifiers, private per-book reading percentages, preferred study path, and focus/day theme so these preferences can sync between devices. Guest bookmarks and topic progress stay in this browser’s local storage."],
+        ["Personal PDF shelf", "If you enable Firebase Storage, PDF bytes and their title, filename, size, storage path, and upload date are stored under your account. The shelf is optional; do not upload files you are not authorized to store."],
+        ["Analytics and external sources", "Firebase Analytics loads only when a measurement ID is configured and the browser reports support. External book links are provided by publishers or official sources, which have their own privacy policies."],
+        ["Your choices", "You can sign out, remove saved books, remove PDFs, and delete your account from workspace settings. Account deletion requires recent authentication and removes this account’s known Firestore and Storage data before deleting its Firebase sign-in."],
+      ],
+    },
+    terms: {
+      eyebrow: "A FEW SHARED EXPECTATIONS",
+      title: <>Learn freely.<br /><em>Respect the source.</em></>,
+      description: "Use Study Shelf as a guide to learning and discovery. It is not a substitute for official curriculum advice or professional guidance.",
+      sections: [
+        ["Respect copyright", "Study Shelf links to official or openly available sources and does not authorize redistribution of copyrighted books. Upload only material you own or have explicit permission to store."],
+        ["Use your account responsibly", "Keep your sign-in secure, provide accurate account information, and do not attempt to access another person’s files or disrupt the service."],
+        ["Availability and accuracy", "External sources, curricula, and Firebase features can change. Check the original publisher and current education-board materials for authoritative information."],
+        ["Cloud costs", "Optional Firebase Storage requires a billing-enabled plan. The project owner is responsible for monitoring usage and any applicable charges."],
+      ],
+    },
+  }[kind];
+
+  return <div className="info-page">
+    <PageIntro eyebrow={content.eyebrow} title={content.title} description={content.description} />
+    <section className="info-sections page-wrap">
+      {content.sections.map(([title, text], index) => <Card className="info-card" key={title}>
+        <span>0{index + 1} / {kind.toUpperCase()}</span><h2>{title}</h2><p>{text}</p>
+      </Card>)}
+      {kind === "about" && <Link className="hero-cta" to="/library">Explore the open library <span>↗</span></Link>}
+    </section>
+  </div>;
+}
+
+function BookDetailPage() {
+  const { id } = useParams();
+  const { savedIds, toggleSaved } = useStudy();
+  const book = [...publicTextbooks, ...openBooks].find((item) => item.id === id);
+  if (!book) return <NotFoundPage />;
+  const sourceUrl = book.publicPath ? `${import.meta.env.BASE_URL}${book.publicPath}` : book.href;
+  const saved = savedIds.includes(book.id);
+  return <section className="book-detail page-wrap" data-reveal>
+    <Link className="back-link" to="/library">← Back to the open library</Link>
+    <div className="book-detail-grid">
+      <div className={`book-detail-cover cover-${book.color}`} aria-hidden="true">
+        <span>{book.publisher}</span><strong>{book.cover}</strong><i>✳</i><small>{book.level}</small>
+      </div>
+      <div className="book-detail-copy">
+        <p className="eyebrow"><span className="eyebrow-dot" /> {book.type === "official" ? "OFFICIAL SOURCE" : "OPEN / THIRD-PARTY RESOURCE"} · {getBookSubjects(book).join(" · ").toUpperCase()}</p>
+        <h1>{book.title}</h1>        <p className="book-detail-author">By {book.author} · {book.level} · {book.track} · {book.language || "Language not specified"}</p>
+        <p className="book-detail-description">{book.description}</p>
+        <div className="book-detail-actions">
+          <a className="hero-cta" href={sourceUrl} target="_blank" rel="noopener noreferrer">{book.source || "Open the publisher source"} <span>↗</span></a>
+          <button className={`bookmark-button ${saved ? "is-saved" : ""}`} onClick={() => toggleSaved(book)} aria-pressed={saved}>
+            {saved ? "Saved to your shelf ✳" : "Save this book ＋"}
+          </button>
+        </div>
+        <aside className="source-disclaimer"><strong>Opens on an external website</strong><p>Study Shelf does not host this book. Confirm the publisher, license, language, and current availability on the source website before reading or downloading.</p>
+          <span>{book.publisher} · {book.href}</span></aside>
+      </div>
+    </div>
+    <section className="related-books"><div className="dashboard-section-heading"><div><p className="eyebrow">KEEP FOLLOWING THE THREAD</p><h2>More from this <em>shelf.</em></h2></div><Link to="/library">Browse everything ↗</Link></div>
+      <div className="book-grid">{[...publicTextbooks, ...openBooks].filter((item) => item.id !== book.id && item.track === book.track).slice(0, 3)
+        .map((item, index) => <BookCard key={item.id} book={item} saved={savedIds.includes(item.id)} onToggle={toggleSaved} style={{ "--card-index": index }} />)}</div>
+    </section>
+  </section>;
+}
+
+function NotFoundPage() {
+  return <section className="not-found page-wrap"><p className="eyebrow">THIS CHAPTER ISN’T IN THE BOOK</p>
+    <h1>Try another<br /><em>page.</em></h1><Link className="hero-cta" to="/">Go to the home page ↗</Link></section>;
+}
+
+function HomeRoute() {
+  const study = useStudy();
+  const navigate = useNavigate();
+  return <HomePage savedCount={study.savedIds.length} savedIds={study.savedIds} onToggleSaved={study.toggleSaved}
+    completedCount={study.completedCount} user={study.user}
+    onChooseTrack={(stream) => {
+      study.setTrackFilter(stream);
+      navigate("/dashboard/progress");
+    }} onSearchSources={(query) => navigate(`/library?q=${encodeURIComponent(query)}`)} />;
+}
+
+function LibraryRoute() {
+  const study = useStudy();
+  return <BookPage savedIds={study.savedIds} onToggleSaved={study.toggleSaved} />;
+}
+
+function AuthRoute({ mode }) {
+  const study = useStudy();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const from = location.state?.from?.pathname || "/dashboard";
+  if (study.user && !study.user.isAnonymous) return <Navigate to={from} replace />;
+  return <div className="auth-page">
+    <div className="auth-page-note"><p className="eyebrow">YOUR SPACE, YOUR PACE</p><h1>A shelf that<br /><em>knows your place.</em></h1>
+      <p>Save a good source. Keep a little progress. Come back when you’re ready.</p></div>
+    <AuthDialog services={study.firebaseServices} currentUser={study.user} initialMode={mode}
+      onClose={() => navigate("/", { replace: true })}
+      onAuthenticated={() => navigate(from, { replace: true })} />
+  </div>;
+}
+
+function RequireAuth() {
+  const { user, firebaseReady } = useStudy();
+  const location = useLocation();
+  if (firebaseConfigured && !firebaseReady) return <div className="page-loading" role="status">Connecting to your private shelf…</div>;
+  if (!user || user.isAnonymous) return <Navigate to="/login" state={{ from: location }} replace />;
+  return <Outlet />;
+}
+
+function DashboardLayout() {
+  const { user, onSignOut, theme, setTheme } = useStudy();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [query, setQuery] = useState("");
+  const navItems = [
+    ["/dashboard", "Overview", "⌂", true],
+    ["/dashboard/library", "My library", "▤"],
+    ["/dashboard/progress", "Study progress", "↗"],
+    ["/dashboard/shelf", "PDF shelf", "＋"],
+    ["/dashboard/settings", "Settings", "⚙"],
+  ];
+  return <div className="dashboard-shell">
+    <aside className="dashboard-sidebar" aria-label="Workspace navigation">
+      <Link to="/dashboard" className="sidebar-brand"><span className="brand-icon">s.</span><span>your workspace<small>STUDY SHELF</small></span></Link>
+      <p className="sidebar-label">YOUR SPACE</p>
+      <nav>{navItems.map(([path, label, icon, exact]) => <Link key={path} to={path}
+        className={`sidebar-link ${location.pathname === path || (!exact && location.pathname.startsWith(`${path}/`)) ? "is-active" : ""}`}
+        aria-current={location.pathname === path ? "page" : undefined}><span aria-hidden="true">{icon}</span>{label}</Link>)}</nav>
+      <div className="sidebar-bottom"><Link to="/library">Discover books <span>↗</span></Link>
+        <p><span className="eyebrow-dot" /> PRIVATE TO YOUR ACCOUNT</p></div>
+    </aside>
+    <div className="dashboard-main">
+      <header className="dashboard-topbar">
+        <form className="workspace-search" role="search" onSubmit={(event) => {
+          event.preventDefault();
+          navigate(`/library?q=${encodeURIComponent(query.trim())}`);
+        }}><label className="sr-only" htmlFor="workspace-search">Search books and subjects</label>
+          <input id="workspace-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search books, subjects, ideas…" />
+          <button type="submit" aria-label="Search">⌕</button></form>
+        <div className="workspace-tools">
+          <ThemeToggle theme={theme} onChange={setTheme} />
+          <Link className="workspace-profile" to="/dashboard/settings" aria-label={`Settings for ${user?.displayName || user?.email}`}>
+            {(user?.displayName || user?.email || "S").slice(0, 1).toUpperCase()}</Link>
+          <button className="workspace-signout" onClick={onSignOut}>Sign out</button>
+        </div>
+      </header>
+      <div className="dashboard-content"><Outlet /></div>
+    </div>
+    <nav className="dashboard-mobile-nav" aria-label="Workspace navigation">
+      {navItems.map(([path, label, icon]) => <Link key={path} to={path}
+        aria-current={location.pathname === path ? "page" : undefined}><span>{icon}</span>{label}</Link>)}
+    </nav>
+  </div>;
+}
+
+function DashboardOverviewRoute() {
+  const { user, savedIds, completedIds, completedCount, firebaseServices, firebaseReady } = useStudy();
+  const [recentPdfs, setRecentPdfs] = useState([]);
+  const [pdfsLoading, setPdfsLoading] = useState(true);
+  const [pdfError, setPdfError] = useState("");
+  const totalUnits = courses.reduce((sum, course) => sum + course.units.length, 0);
+  const completion = totalUnits ? Math.round((completedCount / totalUnits) * 100) : 0;
+  const activeSubjects = [...new Set(courses.filter((course) => course.units.some((unit) => completedIds.includes(unit.id)))
+    .map((course) => course.subject))];
+
+  useEffect(() => {
+    let active = true;
+    if (!firebaseServices || !user || !firebaseReady) return undefined;
+    firebaseServices.getDocs(firebaseServices.query(
+      firebaseServices.collection(firebaseServices.db, "users", user.uid, "books"),
+      firebaseServices.orderBy("createdAt", "desc"),
+      firebaseServices.limit(3),
+    )).then((snapshot) => {
+      if (active) setRecentPdfs(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+    }).catch((error) => {
+      if (active) setPdfError(`Recent PDFs could not be loaded: ${error.message}`);
+    }).finally(() => {
+      if (active) setPdfsLoading(false);
+    });
+    return () => { active = false; };
+  }, [firebaseReady, firebaseServices, user]);
+
+  return <>
+    <DashboardPage user={user} savedCount={savedIds.length} completedIds={completedIds} completedCount={completedCount} />
+    <section className="dashboard-insights page-wrap">
+      <div className="dashboard-section-heading"><div><p className="eyebrow">YOUR MOMENTUM</p><h2>Small steps add <em>up.</em></h2></div>
+        <Link to="/dashboard/progress">Open study progress ↗</Link></div>
+      <div className="insight-grid">
+        <Card className="insight-card"><span>OVERALL STUDY MAP</span>
+          <div className="progress-ring" role="img" aria-label={`${completion}% of study topics complete`}
+            style={{ "--progress-angle": `${completion * 3.6}deg` }}><span>{completion}%</span></div>
+          <ProgressBar value={completion} label="Overall study map completion" />
+          <p>{completedCount} of {totalUnits} learning points marked complete.</p></Card>
+        <Card className="insight-card"><span>SUBJECTS IN MOTION</span><strong>{activeSubjects.length.toString().padStart(2, "0")}</strong>
+          <p>{activeSubjects.length ? activeSubjects.join(" · ") : "Your first subject is waiting for you."}</p></Card>
+        <Card className="insight-card insight-recent"><span>RECENT PRIVATE PDFs</span>
+          {pdfError ? <Toast variant="error">{pdfError}</Toast>
+            : pdfsLoading ? <Skeleton lines={2} />
+              : recentPdfs.length ? recentPdfs.map((book) => <Link key={book.id} to="/dashboard/shelf">
+                <strong>{book.title}</strong><small>{(book.size / (1024 * 1024)).toFixed(2)} MB · Open your private shelf ↗</small></Link>)
+                : <EmptyState title="No personal PDFs yet.">Your saved books and progress work without cloud uploads.</EmptyState>}
+        </Card>
+      </div>
+    </section>
+  </>;
+}
+
+function DashboardLibraryRoute() {
+  const { savedIds, toggleSaved } = useStudy();
+  return <BookPage savedIds={savedIds} onToggleSaved={toggleSaved} initialSavedOnly />;
+}
+
+function DashboardProgressRoute() {
+  const { trackFilter, setTrackFilter, completedIds, toggleUnit, user, navigateToLogin, savedIds, bookProgress, updateBookProgress } = useStudy();
+  return <>
+    <TopicPage trackFilter={trackFilter} onTrackChange={setTrackFilter} completedIds={completedIds}
+      onToggle={toggleUnit} firebaseUser={user} onSignIn={navigateToLogin} />
+    <BookProgressPanel savedIds={savedIds} records={bookProgress} onChange={updateBookProgress} />
+  </>;
+}
+
+function BookProgressPanel({ savedIds, records, onChange }) {
+  const savedBooks = [...publicTextbooks, ...openBooks].filter((book) => savedIds.includes(book.id));
+  const recent = savedBooks.filter((book) => records[book.id]?.updatedAt)
+    .sort((a, b) => new Date(records[b.id].updatedAt?.toDate?.() || records[b.id].updatedAt)
+      - new Date(records[a.id].updatedAt?.toDate?.() || records[a.id].updatedAt));
+  return <section className="book-progress-panel page-wrap">
+    <div className="dashboard-section-heading"><div><p className="eyebrow">YOUR READING PROGRESS</p>
+      <h2>Read a little.<br /><em>Mark your place.</em></h2></div>
+      <p>Update a saved book’s progress whenever it feels useful. This is a private manual note, not a reading tracker.</p></div>
+    {!savedBooks.length ? <EmptyState title="Save a book to track your reading.">
+      Your book-level progress appears here after you add a title to your library.
+    </EmptyState> : <>
+      {recent.length > 0 && <p className="reading-activity-note">RECENTLY UPDATED · {recent.slice(0, 3).map((book) => book.title).join(" · ")}</p>}
+      <div className="book-progress-list">{savedBooks.map((book) => {
+        const percent = records[book.id]?.percent || 0;
+        return <article className="book-progress-row" key={book.id}>
+          <div className="book-progress-meta"><span>{book.subject} · {book.level}</span><strong>{book.title}</strong></div>
+          <label><span className="sr-only">Reading progress for {book.title}</span>
+            <input type="range" min="0" max="100" step="5" value={percent}
+              onChange={(event) => onChange(book.id, Number(event.target.value))} aria-valuetext={`${percent}% read`} />
+          </label>
+          <ProgressBar value={percent} label={`${book.title} reading progress`} />
+          <strong className="book-progress-value">{percent}%</strong>
+        </article>;
+      })}</div>
+    </>}
+  </section>;
+}
+
+function DashboardShelfRoute() {
+  const { user, firebaseServices, firebaseReady } = useStudy();
+  return <CloudShelfPage user={user} services={firebaseServices} firebaseReady={firebaseReady} />;
+}
+
+function SettingsRoute() {
+  const study = useStudy();
+  return <AccountPage user={study.user} firebaseReady={study.firebaseReady} onSignOut={study.onSignOut}
+    onSyncRetry={study.retryFirebase} theme={study.theme} setTheme={study.setTheme}
+    onDeleteAccount={study.deleteAccount} />;
+}
+
 function App() {
-  const route = useStudyRoute();
+  const location = useLocation();
+  const navigate = useNavigate();
   const guestProfile = useMemo(readGuestProfile, []);
   const [savedIds, setSavedIds] = useState(guestProfile.savedBookIds);
   const [completedIds, setCompletedIds] = useState(guestProfile.completedUnitIds);
+  const [bookProgress, setBookProgress] = useState({});
   const [user, setUser] = useState(null);
+  const [, setDisplayNameRefresh] = useState("");
   const [firebaseServices, setFirebaseServices] = useState(null);
   const [firebaseReady, setFirebaseReady] = useState(!firebaseConfigured);
   const [syncError, setSyncError] = useState("");
-  const [authOpen, setAuthOpen] = useState(false);
   const [trackFilter, setTrackFilter] = useState("all");
   const [connectionAttempt, setConnectionAttempt] = useState(0);
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem("study-shelf-theme") === "day" ? "day" : "focus";
+    } catch (error) {
+      console.error("Could not read your theme preference.", error);
+      return "focus";
+    }
+  });
   const savedIdsRef = useRef(savedIds);
   const completedIdsRef = useRef(completedIds);
   const guestProfileRef = useRef(guestProfile);
@@ -1031,6 +1286,16 @@ function App() {
 
   const allUnitIds = useMemo(() => courses.flatMap((course) => course.units.map((unit) => unit.id)), []);
   const completedCount = completedIds.filter((id) => allUnitIds.includes(id)).length;
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem("study-shelf-theme", theme);
+    } catch (error) {
+      console.error("Could not save your theme preference.", error);
+    }
+    if (user && firebaseServices && firebaseReady) void persistProfile({ theme });
+  }, [firebaseReady, firebaseServices, theme, user]);
 
   useEffect(() => {
     try {
@@ -1051,20 +1316,29 @@ function App() {
       unsubscribe = services.onAuthStateChanged(services.auth, async (currentUser) => {
         if (!active) return;
         setUser(currentUser);
+        setDisplayNameRefresh(currentUser?.displayName || "");
         if (!currentUser) {
+          setBookProgress({});
           setFirebaseReady(true);
           return;
         }
 
+        setBookProgress({});
         setFirebaseReady(false);
         setSyncError("");
         const profileRef = services.doc(services.db, "users", currentUser.uid);
         try {
           const profileSnapshot = await services.getDoc(profileRef);
           const cloudProfile = profileSnapshot.exists() ? profileSnapshot.data() : {};
+          if (cloudProfile.theme === "day" || cloudProfile.theme === "focus") setTheme(cloudProfile.theme);
+          if (tracks.some((track) => track.id === cloudProfile.preferredStream)) setTrackFilter(cloudProfile.preferredStream);
           const legacySavedSnapshot = await services.getDocs(
             services.collection(services.db, "users", currentUser.uid, "savedBooks"),
           );
+          const bookProgressSnapshot = await services.getDocs(
+            services.collection(services.db, "users", currentUser.uid, "bookProgress"),
+          );
+          const nextBookProgress = Object.fromEntries(bookProgressSnapshot.docs.map((entry) => [entry.id, entry.data()]));
           const legacySavedIds = legacySavedSnapshot.docs.map((savedBook) => savedBook.id);
           const nextSaved = [...new Set([
             ...(Array.isArray(cloudProfile.savedBookIds) ? cloudProfile.savedBookIds : []),
@@ -1075,6 +1349,7 @@ function App() {
           if (!active) return;
           setSavedIds(nextSaved);
           setCompletedIds(nextCompleted);
+          setBookProgress(nextBookProgress);
           writeGuestProfile({ savedBookIds: nextSaved, completedUnitIds: nextCompleted });
           await services.setDoc(profileRef, {
             savedBookIds: nextSaved,
@@ -1137,6 +1412,31 @@ function App() {
     void persistProfile({ completedUnitIds: next });
   }
 
+  async function updateBookProgress(bookId, percent) {
+    if (!user || !firebaseServices || !firebaseReady) {
+      setSyncError("Your Firebase account is still connecting. Try again shortly.");
+      return;
+    }
+    const safePercent = Math.min(100, Math.max(0, Math.round(percent / 5) * 5));
+    const previous = bookProgress[bookId];
+    setBookProgress((current) => ({ ...current, [bookId]: { percent: safePercent, updatedAt: new Date() } }));
+    try {
+      await firebaseServices.setDoc(
+        firebaseServices.doc(firebaseServices.db, "users", user.uid, "bookProgress", bookId),
+        { percent: safePercent, updatedAt: firebaseServices.serverTimestamp() },
+      );
+      setSyncError("");
+    } catch (error) {
+      setBookProgress((current) => {
+        const next = { ...current };
+        if (previous) next[bookId] = previous;
+        else delete next[bookId];
+        return next;
+      });
+      setSyncError(`Could not save reading progress: ${error.message}`);
+    }
+  }
+
   async function handleSignOut() {
     if (!firebaseServices) return;
     const guestProfileAtSignOut = guestProfileRef.current;
@@ -1150,39 +1450,104 @@ function App() {
     }
   }
 
-  const pageTitles = {
-    home: "Study Shelf — Find your next great book",
-    topics: "Study map — Study Shelf",
-    library: "Free book library — Study Shelf",
-    simulations: "Interactive simulations — Study Shelf",
-    models: "Interactive 3D models — Study Shelf",
-    account: "Your account — Study Shelf",
-  };
-  const currentPage = pageTitles[route] ? route : "not-found";
+  async function deleteAccount(password) {
+    if (!user || !firebaseServices) throw new Error("Your Firebase account is not ready.");
+    const providers = user.providerData.map((provider) => provider.providerId);
+    if (providers.includes("password")) {
+      if (!password) throw new Error("Enter your password to confirm account deletion.");
+      const credential = firebaseServices.EmailAuthProvider.credential(user.email, password);
+      await firebaseServices.reauthenticateWithCredential(user, credential);
+    } else if (providers.includes("google.com")) {
+      await firebaseServices.reauthenticateWithPopup(user, new firebaseServices.GoogleAuthProvider());
+    } else {
+      throw new Error("This sign-in provider does not yet support secure account deletion in the app.");
+    }
+
+    const booksRef = firebaseServices.collection(firebaseServices.db, "users", user.uid, "books");
+    const booksSnapshot = await firebaseServices.getDocs(booksRef);
+    for (const bookSnapshot of booksSnapshot.docs) {
+      const book = bookSnapshot.data();
+      if (book.storagePath) {
+        try {
+          await firebaseServices.deleteObject(firebaseServices.ref(firebaseServices.storage, book.storagePath));
+        } catch (storageError) {
+          if (storageError.code !== "storage/object-not-found") throw storageError;
+        }
+      }
+      await firebaseServices.deleteDoc(bookSnapshot.ref);
+    }
+
+    const legacySavedRef = firebaseServices.collection(firebaseServices.db, "users", user.uid, "savedBooks");
+    const legacySavedSnapshot = await firebaseServices.getDocs(legacySavedRef);
+    for (const savedBook of legacySavedSnapshot.docs) await firebaseServices.deleteDoc(savedBook.ref);
+    const bookProgressRef = firebaseServices.collection(firebaseServices.db, "users", user.uid, "bookProgress");
+    const bookProgressSnapshot = await firebaseServices.getDocs(bookProgressRef);
+    for (const record of bookProgressSnapshot.docs) await firebaseServices.deleteDoc(record.ref);
+    await firebaseServices.deleteDoc(firebaseServices.doc(firebaseServices.db, "users", user.uid));
+    await firebaseServices.deleteUser(user);
+    setSavedIds([]);
+    setCompletedIds([]);
+    guestProfileRef.current = { savedBookIds: [], completedUnitIds: [] };
+    writeGuestProfile(guestProfileRef.current);
+    navigate("/", { replace: true });
+  }
+
+  async function updateDisplayName(displayName) {
+    if (!user || !firebaseServices) throw new Error("Your Firebase account is not ready.");
+    await firebaseServices.updateProfile(user, { displayName });
+    setDisplayNameRefresh(displayName);
+  }
 
   useEffect(() => {
-    document.title = pageTitles[route] || "Page not found — Study Shelf";
-  }, [route]);
+    window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+    const titles = {
+      "/": "Study Shelf — Find your next great book",
+      "/library": "Discover books — Study Shelf",
+      "/about": "About — Study Shelf",
+      "/privacy": "Privacy — Study Shelf",
+      "/terms": "Terms — Study Shelf",
+      "/login": "Sign in — Study Shelf",
+      "/signup": "Create your workspace — Study Shelf",
+      "/dashboard": "Your workspace — Study Shelf",
+      "/dashboard/library": "Your library — Study Shelf",
+      "/dashboard/progress": "Study progress — Study Shelf",
+      "/dashboard/shelf": "Your PDF shelf — Study Shelf",
+      "/dashboard/settings": "Workspace settings — Study Shelf",
+    };
+    document.title = titles[location.pathname] || (location.pathname.startsWith("/book/") ? "Book details — Study Shelf" : "Page not found — Study Shelf");
+  }, [location.pathname]);
+
+  const studyValue = {
+    user, firebaseServices, firebaseReady, syncError, savedIds, completedIds, bookProgress, completedCount,
+    trackFilter, setTrackFilter, toggleSaved, toggleUnit, onSignOut: handleSignOut,
+    deleteAccount, persistProfile, updateBookProgress,
+    updateDisplayName,
+    retryFirebase: () => { setSyncError(""); setFirebaseReady(false); setConnectionAttempt((value) => value + 1); },
+    theme, setTheme, navigateToLogin: () => navigate("/login"),
+  };
+
+  useEffect(() => {
+    if (!location.hash.startsWith("#/")) return;
+    const [legacyPath, query = ""] = location.hash.slice(1).split("?");
+    const redirects = {
+      "/": "/",
+      "/dashboard": "/dashboard",
+      "/topics": "/dashboard/progress",
+      "/library": "/library",
+      "/saved": "/dashboard/library",
+      "/shelf": "/dashboard/shelf",
+      "/account": "/dashboard/settings",
+    };
+    const destination = redirects[legacyPath];
+    if (destination) navigate(`${destination}${query ? `?${query}` : ""}`, { replace: true });
+  }, [location.hash, navigate]);
 
   return (
-    <>
+    <StudyContext.Provider value={studyValue}>
       <MotionEffects />
-      <Header user={user} savedCount={savedIds.length} onSignIn={() => setAuthOpen(true)} onSignOut={handleSignOut} syncError={syncError} />
-      <main id="top">
-        {currentPage === "home" && <HomePage savedCount={savedIds.length} completedCount={completedCount}
-          onChooseTrack={(stream) => { setTrackFilter(stream); window.location.hash = "#/topics"; }} />}
-        {currentPage === "topics" && <TopicPage trackFilter={trackFilter} onTrackChange={setTrackFilter}
-          completedIds={completedIds} onToggle={toggleUnit} firebaseUser={user} onSignIn={() => setAuthOpen(true)} />}
-        {currentPage === "library" && <BookPage savedIds={savedIds} onToggleSaved={toggleSaved}
-          onSignIn={() => setAuthOpen(true)} firebaseUser={user} firebaseReady={firebaseReady} />}
-        {currentPage === "simulations" && <Suspense fallback={<PageLoading />}><Simulations /></Suspense>}
-        {currentPage === "models" && <Suspense fallback={<PageLoading />}><Models3D /></Suspense>}
-        {currentPage === "account" && <AccountPage user={user} firebaseReady={firebaseReady} onSignIn={() => setAuthOpen(true)}
-          onSignOut={handleSignOut} onSyncRetry={() => { setSyncError(""); setFirebaseReady(false); setConnectionAttempt((value) => value + 1); }} />}
-        {currentPage === "not-found" && <section className="not-found"><p className="eyebrow">THIS CHAPTER ISN’T IN THE BOOK</p>
-          <h1>Try another<br /><em>page.</em></h1><a className="hero-cta" href="#/">Go to the home page ↗</a></section>}
-      </main>
-      <Footer />
+      <Header user={user} route={location.pathname} savedCount={savedIds.length} onSignOut={handleSignOut} syncError={syncError} />
+      <main id="top"><Outlet /></main>
+      <Footer user={user} />
       <div className="firebase-status" aria-live="polite">
         <span className={`status-dot ${firebaseConfigured && user && firebaseReady && !syncError ? "status-live" : ""}`} />
         {firebaseConfigured
@@ -1190,15 +1555,44 @@ function App() {
             : "Guest shelf · sign in to sync"
           : "Guest mode · saved on this browser"}
       </div>
-      {authOpen && <AuthDialog services={firebaseServices} currentUser={user} onClose={() => setAuthOpen(false)} />}
-    </>
+    </StudyContext.Provider>
   );
 }
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Study Shelf could not find its root element.");
 const root = createRoot(rootElement);
-root.render(<React.StrictMode><App /></React.StrictMode>);
+const router = createBrowserRouter([{
+  path: "/",
+  element: <App />,
+  errorElement: <NotFoundPage />,
+  children: [
+    { index: true, element: <HomeRoute /> },
+    { path: "library", element: <LibraryRoute /> },
+    { path: "book/:id", element: <BookDetailPage /> },
+    { path: "about", element: <InfoPage kind="about" /> },
+    { path: "privacy", element: <InfoPage kind="privacy" /> },
+    { path: "terms", element: <InfoPage kind="terms" /> },
+    { path: "login", element: <AuthRoute mode="signin" /> },
+    { path: "signup", element: <AuthRoute mode="signup" /> },
+    {
+      path: "dashboard",
+      element: <RequireAuth />,
+      children: [{
+        element: <DashboardLayout />,
+        children: [
+          { index: true, element: <DashboardOverviewRoute /> },
+          { path: "library", element: <DashboardLibraryRoute /> },
+          { path: "progress", element: <DashboardProgressRoute /> },
+          { path: "shelf", element: <DashboardShelfRoute /> },
+          { path: "settings", element: <SettingsRoute /> },
+        ],
+      }],
+    },
+    { path: "*", element: <NotFoundPage /> },
+  ],
+}]);
+root.render(<React.StrictMode><RouterProvider router={router} /></React.StrictMode>);
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => root.unmount());

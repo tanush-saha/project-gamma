@@ -11,6 +11,8 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
           'savedBookIds',
           'completedUnitIds',
+          'theme',
+          'preferredStream',
           'updatedAt'
         ])
         && request.resource.data.keys().hasAll([
@@ -21,12 +23,70 @@ service cloud.firestore {
         && request.resource.data.savedBookIds is list
         && request.resource.data.savedBookIds.size() <= 5000
         && request.resource.data.completedUnitIds is list
-        && request.resource.data.completedUnitIds.size() <= 5000;
-      allow delete: if false;
+        && request.resource.data.completedUnitIds.size() <= 5000
+        && (!('theme' in request.resource.data)
+          || request.resource.data.theme in ['focus', 'day'])
+        && (!('preferredStream' in request.resource.data)
+          || request.resource.data.preferredStream in ['PCM', 'PCB', 'Commerce', 'Humanities']);
+      allow delete: if isProfileOwner();
 
-      // Allows the previous anonymous shelf to migrate its old saved-book list.
       match /savedBooks/{bookId} {
         allow read, write: if isProfileOwner();
+      }
+
+      match /bookProgress/{bookId} {
+        function hasValidBookProgress() {
+          return request.resource.data.keys().hasOnly(['percent', 'updatedAt'])
+            && request.resource.data.keys().hasAll(['percent', 'updatedAt'])
+            && request.resource.data.percent is int
+            && request.resource.data.percent >= 0
+            && request.resource.data.percent <= 100
+            && request.resource.data.updatedAt is timestamp;
+        }
+
+        allow read, delete: if isProfileOwner();
+        allow create, update: if isProfileOwner() && hasValidBookProgress();
+      }
+
+      match /books/{bookId} {
+        function hasValidBookMetadata() {
+          return request.resource.data.keys().hasOnly([
+              'title',
+              'originalName',
+              'size',
+              'contentType',
+              'storagePath',
+              'createdAt'
+            ])
+            && request.resource.data.keys().hasAll([
+              'title',
+              'originalName',
+              'size',
+              'contentType',
+              'storagePath',
+              'createdAt'
+            ])
+            && request.resource.data.title is string
+            && request.resource.data.title.size() > 0
+            && request.resource.data.title.size() <= 180
+            && request.resource.data.originalName is string
+            && request.resource.data.originalName.size() <= 255
+            && request.resource.data.size is int
+            && request.resource.data.size > 7
+            && request.resource.data.size <= 20 * 1024 * 1024
+            && request.resource.data.contentType == 'application/pdf'
+            && request.resource.data.storagePath
+              == 'users/' + userId + '/books/' + bookId + '.pdf'
+            && request.resource.data.createdAt is timestamp;
+        }
+
+        allow read, delete: if isProfileOwner();
+        allow create: if isProfileOwner() && hasValidBookMetadata();
+        allow update: if isProfileOwner()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title'])
+          && request.resource.data.title is string
+          && request.resource.data.title.size() > 0
+          && request.resource.data.title.size() <= 180;
       }
     }
   }
