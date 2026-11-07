@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Link, Navigate, Outlet, RouterProvider, useLocation, useNavigate, useParams } from "react-router-dom";
 import { openBooks } from "./books.js";
 import { courses, publicTextbooks, textbookCaution } from "./curriculum.js";
-import { firebaseConfigured, loadFirebase } from "./firebase.js";
+import { firebaseConfigured, loadFirebase, missingFirebaseConfig } from "./firebase.js";
 import { Badge, Button, Card, EmptyState, ProgressBar, Skeleton, Tabs, ThemeToggle, Toast } from "./components/ui.jsx";
 import "./styles.css";
 
@@ -91,11 +91,11 @@ function MotionEffects() {
     };
     window.addEventListener("pointermove", moveCursor, { passive: true });
     document.addEventListener("pointerover", markInteractive);
-    document.documentElement.classList.add("custom-cursor-ready");
+    document.documentElement.classList.add("cursor-ready");
     return () => {
       window.removeEventListener("pointermove", moveCursor);
       document.removeEventListener("pointerover", markInteractive);
-      document.documentElement.classList.remove("custom-cursor-ready");
+      document.documentElement.classList.remove("cursor-ready");
     };
   }, []);
 
@@ -483,7 +483,7 @@ function BookCard({ book, saved, onToggle, style }) {
   );
 }
 
-function BookPage({ savedIds, onToggleSaved, initialSavedOnly = false }) {
+function BookPage({ savedIds, onToggleSaved, initialSavedOnly = false, privateLibrary = false }) {
   const location = useLocation();
   const [track, setTrack] = useState(initialSavedOnly ? "all" : "all");
   const [grade, setGrade] = useState("all");
@@ -514,9 +514,9 @@ function BookPage({ savedIds, onToggleSaved, initialSavedOnly = false }) {
 
   return (
     <section className="page-wrap books-page" data-reveal>
-      <p className="eyebrow"><span className="eyebrow-dot" /> THE OPEN SHELF · BOOKS WITH A GOOD SOURCE</p>
-      <div className="page-heading-row"><h1>{savedOnly ? <>Your saved<br /><em>reading.</em></> : <>Find your next<br /><em>good book.</em></>}</h1>
-        <p>{savedOnly ? "A small collection of good places to pick up where you left off." : "Start with the prescribed NCERT books. Then follow your curiosity into open books, courses, and study resources from their sources."}</p></div>
+      <p className="eyebrow"><span className="eyebrow-dot" /> {privateLibrary ? "YOUR STUDY LIBRARY · SIGNED-IN WORKSPACE" : "THE OPEN SHELF · BOOKS WITH A GOOD SOURCE"}</p>
+      <div className="page-heading-row"><h1>{savedOnly ? <>Your saved<br /><em>reading.</em></> : privateLibrary ? <>Your study<br /><em>library.</em></> : <>Find your next<br /><em>good book.</em></>}</h1>
+        <p>{savedOnly ? "A small collection of good places to pick up where you left off." : "Browse official and openly available books and study resources. Save useful sources to keep them close; readings always open at their provider."}</p></div>
       <div className="book-filters">
         <Tabs className="track-tabs" itemClassName="track-tab" label="Filter books by study path"
           value={track} onChange={setTrack}
@@ -558,10 +558,13 @@ function CloudShelfPage({ user, services, firebaseReady }) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
+  const [uploadSummary, setUploadSummary] = useState("");
+  const [uploadFileProgress, setUploadFileProgress] = useState("");
   const [reader, setReader] = useState(null);
   const [editingId, setEditingId] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const fileInput = useRef(null);
+  const folderInput = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -585,72 +588,115 @@ function CloudShelfPage({ user, services, firebaseReady }) {
   }, [reader?.url]);
 
   async function handleUpload(event) {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files || []);
     event.target.value = "";
-    if (!file) return;
-    if (file.size > 20 * 1024 * 1024) {
-      setError("This PDF is larger than 20 MB. Choose a smaller file.");
-      return;
-    }
-    if (file.type !== "application/pdf") {
-      setError("Choose a PDF file.");
-      return;
-    }
-    const signature = new TextDecoder().decode(await file.slice(0, 5).arrayBuffer());
-    if (signature !== "%PDF-") {
-      setError("This file does not have a valid PDF signature.");
-      return;
-    }
+    if (!files.length) return;
     if (!services || !firebaseReady) {
       setError("Your Firebase account is still connecting. Try again shortly.");
       return;
     }
+    if (!services.storage || !services.ref || !services.uploadBytesResumable) {
+      setError("Firebase sign-in and your study library are available, but cloud PDF uploads are not configured. Add the Storage bucket to the GitHub Actions configuration and enable Firebase Storage; check its current billing requirements first.");
+      return;
+    }
+
+    setError("");
+    setUploadSummary("");
+    const validFiles = [];
+    const failures = [];
+    for (const file of files) {
+      if (file.size > 20 * 1024 * 1024) {
+      failures.push(`${file.name}: larger than 20 MB`);
+      continue;
+      }
+      if (!/\.pdf$/i.test(file.name) || (file.type && file.type !== "application/pdf")) {
+      failures.push(`${file.name}: not a PDF`);
+      continue;
+      }
+      const signature = new TextDecoder().decode(await file.slice(0, 5).arrayBuffer());
+      if (signature !== "%PDF-") {
+      failures.push(`${file.name}: invalid PDF signature`);
+      continue;
+      }
+      validFiles.push(file);
+    }
+
+    if (!validFiles.length) {
+      setError(`No PDFs were uploaded. ${failures.join("; ")}`);
+      return;
+    }
+
+    const totalBytes = validFiles.reduce((total, file) => total + file.size, 0);
+    const totalMegabytes = (totalBytes / (1024 * 1024)).toFixed(1);
+    if (!window.confirm(
+      `Upload ${validFiles.length} PDF${validFiles.length === 1 ? "" : "s"} (${totalMegabytes} MB total) to your private Firebase shelf? Only upload files you own or are authorized to store. Firebase Storage may incur charges.`,
+    )) return;
 
     setUploading(true);
     setProgress(0);
-    setError("");
-    const id = crypto.randomUUID();
-    const storagePath = `users/${user.uid}/books/${id}.pdf`;
-    const fileRef = services.ref(services.storage, storagePath);
+    let completedBytes = 0;
+    const uploadedBooks = [];
     try {
-      const task = services.uploadBytesResumable(fileRef, file, { contentType: "application/pdf" });
-      await new Promise((resolve, reject) => {
-        task.on("state_changed", (snapshot) => {
-          setProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
-        }, reject, resolve);
-      });
-      const title = file.name.replace(/\.pdf$/i, "").trim().slice(0, 180) || "Untitled PDF";
-      const metadata = {
-        title,
-        originalName: file.name.slice(0, 255),
-        size: file.size,
-        contentType: "application/pdf",
-        storagePath,
-        createdAt: new Date(),
-      };
+      for (const [index, file] of validFiles.entries()) {
+      setUploadFileProgress(`Uploading ${index + 1} of ${validFiles.length}: ${file.name}`);
+      const id = crypto.randomUUID();
+      const storagePath = `users/${user.uid}/books/${id}.pdf`;
+      const fileRef = services.ref(services.storage, storagePath);
       try {
-        await services.setDoc(services.doc(services.db, "users", user.uid, "books", id), {
-          ...metadata,
-          createdAt: services.serverTimestamp(),
+        const task = services.uploadBytesResumable(fileRef, file, { contentType: "application/pdf" });
+        await new Promise((resolve, reject) => {
+          task.on("state_changed", (snapshot) => {
+            const percent = ((completedBytes + snapshot.bytesTransferred) / totalBytes) * 100;
+            setProgress(Math.round(percent));
+          }, reject, resolve);
         });
-      } catch (metadataError) {
+        const title = file.name.replace(/\.pdf$/i, "").trim().slice(0, 180) || "Untitled PDF";
+        const metadata = {
+          title,
+          originalName: (file.webkitRelativePath || file.name).slice(0, 255),
+          size: file.size,
+          contentType: "application/pdf",
+          storagePath,
+          createdAt: new Date(),
+        };
         try {
-          await services.deleteObject(fileRef);
-        } catch (cleanupError) {
-          throw new Error(`${metadataError.message} The uploaded file could not be cleaned up: ${cleanupError.message}`);
+          await services.setDoc(services.doc(services.db, "users", user.uid, "books", id), {
+            ...metadata,
+            createdAt: services.serverTimestamp(),
+          });
+        } catch (metadataError) {
+          try {
+            await services.deleteObject(fileRef);
+          } catch (cleanupError) {
+            throw new Error(`${metadataError.message}. Uploaded file cleanup failed: ${cleanupError.message}`);
+          }
+          throw metadataError;
         }
-        throw metadataError;
+        uploadedBooks.push({ id, ...metadata });
+      } catch (uploadError) {
+        failures.push(`${file.name}: ${uploadError.message}`);
       }
-      setBooks((current) => [{ id, ...metadata }, ...current]);
-    } catch (uploadError) {
-      setError(`Upload failed: ${uploadError.message}`);
+      completedBytes += file.size;
+      setProgress(Math.round((completedBytes / totalBytes) * 100));
+      }
+      if (uploadedBooks.length) {
+      setBooks((current) => [...uploadedBooks, ...current]);
+      setUploadSummary(`${uploadedBooks.length} PDF${uploadedBooks.length === 1 ? "" : "s"} added to your private shelf.`);
+      }
+      if (failures.length) {
+      setError(`${failures.length} file${failures.length === 1 ? " was" : "s were"} skipped or failed: ${failures.join("; ")}`);
+      }
     } finally {
       setUploading(false);
+      setUploadFileProgress("");
     }
   }
 
   async function openBook(book) {
-    if (!services) return;
+    if (!services?.storage || !services.ref || !services.getBytes) {
+      setError("Firebase Storage is not configured for this deployment. Your account and book library still work without PDF uploads.");
+      return;
+    }
     setError("");
     try {
       const bytes = await services.getBytes(services.ref(services.storage, book.storagePath), 20 * 1024 * 1024);
@@ -663,7 +709,10 @@ function CloudShelfPage({ user, services, firebaseReady }) {
 
   async function removeBook(book) {
     if (!window.confirm(`Permanently remove "${book.title}" from your Firebase account? This cannot be undone.`)) return;
-    if (!services) return;
+    if (!services?.storage || !services.ref || !services.deleteObject) {
+      setError("Firebase Storage is not configured for this deployment, so this PDF cannot be removed safely.");
+      return;
+    }
     setError("");
     const fileRef = services.ref(services.storage, book.storagePath);
     try {
@@ -705,13 +754,19 @@ function CloudShelfPage({ user, services, firebaseReady }) {
         <p className="cloud-storage-cost-note">Optional: private PDF storage requires Firebase's billing-enabled Blaze plan. Check current pricing and quotas before uploading; no-cost allowances are not a spending cap.</p>
         <div className="cloud-shelf-toolbar"><div><p className="eyebrow">PERSONAL FILES · PRIVATE BY DEFAULT</p>
           <h2>A place for your own<br /><em>reading.</em></h2></div>
-          <div><button className="hero-cta" onClick={() => fileInput.current?.click()} disabled={!firebaseReady || uploading}>
-            {uploading ? `Uploading ${progress}%` : "Add a PDF"} <span aria-hidden="true">＋</span></button>
-            <input ref={fileInput} className="sr-only" type="file" accept=".pdf,application/pdf" onChange={handleUpload} />
-            <p className="cloud-shelf-limit">PDF · up to 20 MB each</p></div>
+          <div><div className="cloud-upload-actions">
+            <button className="hero-cta" onClick={() => fileInput.current?.click()} disabled={!firebaseReady || uploading || !services?.storage}>
+              {uploading ? `Uploading ${progress}%` : "Choose PDFs"} <span aria-hidden="true">＋</span></button>
+            <button className="cloud-folder-button" onClick={() => folderInput.current?.click()} disabled={!firebaseReady || uploading || !services?.storage}>
+              Choose folder</button>
+            <input ref={fileInput} className="sr-only" type="file" accept=".pdf,application/pdf" multiple onChange={handleUpload} />
+            <input ref={folderInput} className="sr-only" type="file" accept=".pdf,application/pdf" multiple webkitdirectory="" onChange={handleUpload} />
+          </div><p className="cloud-shelf-limit">{services?.storage ? "Select multiple PDFs or a folder · 20 MB maximum per PDF" : "Cloud Storage not configured"}</p></div>
         </div>
         {uploading && <div className="cloud-upload-progress" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100">
           <span style={{ width: `${progress}%` }} /></div>}
+        {uploading && <p className="cloud-upload-status" role="status">{uploadFileProgress}</p>}
+        {uploadSummary && <p className="cloud-upload-success" role="status">{uploadSummary}</p>}
         {error && <p className="private-error" role="alert">{error}</p>}
         {loading ? <Skeleton className="shelf-skeleton" lines={3} />
           : books.length === 0 ? <EmptyState title="Your cloud shelf is empty.">Add a PDF you own or are authorized to store.</EmptyState>
@@ -744,7 +799,7 @@ function CloudShelfPage({ user, services, firebaseReady }) {
   );
 }
 
-function AuthDialog({ services, currentUser, onClose, onAuthenticated = onClose, initialMode = "signin" }) {
+function AuthDialog({ services, currentUser, onClose, connectionError, onRetry, initialMode = "signin" }) {
   const [mode, setMode] = useState(currentUser?.isAnonymous ? "upgrade" : initialMode);
   const upgrading = currentUser?.isAnonymous;
   const dialogRef = useRef(null);
@@ -797,17 +852,15 @@ function AuthDialog({ services, currentUser, onClose, onAuthenticated = onClose,
     try {
       if (mode === "signup" || mode === "upgrade") {
         const credential = mode === "upgrade"
-          ? await services.linkWithCredential(
-            currentUser,
-            services.EmailAuthProvider.credential(email, password),
-          )
-          : await services.createUserWithEmailAndPassword(services.auth, email, password);
-        if (displayName.trim()) await services.updateProfile(credential.user, { displayName: displayName.trim() });
-        onAuthenticated();
-      } else if (mode === "signin") {
-        await services.signInWithEmailAndPassword(services.auth, email, password);
-        onAuthenticated();
-      } else {
+            ? await services.linkWithCredential(
+              currentUser,
+              services.EmailAuthProvider.credential(email, password),
+            )
+            : await services.createUserWithEmailAndPassword(services.auth, email, password);
+          if (displayName.trim()) await services.updateProfile(credential.user, { displayName: displayName.trim() });
+        } else if (mode === "signin") {
+          await services.signInWithEmailAndPassword(services.auth, email, password);
+        } else {
         await services.sendPasswordResetEmail(services.auth, email);
         setNotice("If an account exists for this address, a password-reset link is on its way.");
       }
@@ -821,7 +874,11 @@ function AuthDialog({ services, currentUser, onClose, onAuthenticated = onClose,
         "auth/too-many-requests": "Too many attempts. Wait a little, then try again.",
         "auth/operation-not-allowed": "Enable Email/Password sign-in in Firebase Authentication first.",
         "auth/popup-blocked": "Allow pop-ups for this site and try Google sign-in again.",
-        "auth/unauthorized-domain": "Add this Firebase Hosting domain to Authentication's authorized domains.",
+        "auth/invalid-api-key": "Firebase rejected this app's API key. Check the GitHub Actions web-app configuration and rerun the Pages deployment.",
+        "auth/unauthorized-domain": `Add ${window.location.hostname} to Firebase Authentication → Settings → Authorized domains, then redeploy.`,
+        "auth/network-request-failed": "Firebase could not be reached. Check your connection and try again.",
+        "auth/popup-closed-by-user": "The Google sign-in window was closed before sign-in completed.",
+        "auth/account-exists-with-different-credential": "This email already uses another sign-in method. Sign in with that method first.",
       };
       setError(friendlyErrors[authError.code] || `Could not complete sign-in: ${authError.message}`);
     } finally {
@@ -837,11 +894,16 @@ function AuthDialog({ services, currentUser, onClose, onAuthenticated = onClose,
       const provider = new services.GoogleAuthProvider();
       if (currentUser?.isAnonymous) await services.linkWithPopup(currentUser, provider);
       else await services.signInWithPopup(services.auth, provider);
-      onAuthenticated();
     } catch (authError) {
       setError(authError.code === "auth/unauthorized-domain"
-        ? "Add this Firebase Hosting domain to Authentication's authorized domains."
-        : `Google sign-in failed: ${authError.message}`);
+        ? `Add ${window.location.hostname} to Firebase Authentication → Settings → Authorized domains, then try again.`
+        : authError.code === "auth/popup-blocked"
+          ? "Allow pop-ups for this site and try Google sign-in again."
+          : authError.code === "auth/invalid-api-key"
+            ? "Firebase rejected this app's API key. Check the GitHub Actions web-app configuration and rerun the Pages deployment."
+            : authError.code === "auth/network-request-failed"
+              ? "Firebase could not be reached. Check your connection and try again."
+          : `Google sign-in failed: ${authError.message}`);
     } finally {
       setBusy(false);
     }
@@ -855,7 +917,11 @@ function AuthDialog({ services, currentUser, onClose, onAuthenticated = onClose,
         <h2 id="auth-heading">{mode === "signup" || mode === "upgrade"
           ? upgrading ? "Save your anonymous shelf." : "Make room to grow."
           : mode === "reset" ? "A fresh start." : "Welcome back."}</h2>
-        <p className="auth-intro">Save books, keep your study progress in sync, and open a private workspace for your own permitted PDF files.</p>
+        <p className="auth-intro">A free account opens your study library, syncs saved books and progress, and gives you a private workspace. PDF uploads are optional and require Firebase Storage.</p>
+        {!services && firebaseConfigured && connectionError && <div className="auth-connection-error" role="alert">
+          <p>{connectionError}</p>
+          <button type="button" onClick={onRetry}>Retry Firebase connection</button>
+        </div>}
         {mode !== "reset" && <button className="google-sign-in" onClick={handleGoogleSignIn} disabled={busy || !services}>
           <span aria-hidden="true">G</span> {upgrading ? "Link Google to your shelf" : "Continue with Google"}</button>}
         {mode !== "reset" && <div className="auth-separator"><span>OR WITH EMAIL</span></div>}
@@ -871,7 +937,9 @@ function AuthDialog({ services, currentUser, onClose, onAuthenticated = onClose,
           {notice && <p className="auth-success" role="status">{notice}</p>}
           {mode === "upgrade" && <label>Password<input value={password} onChange={(event) => setPassword(event.target.value)}
             type="password" autoComplete="new-password" minLength={6} required /></label>}
-          <button className="primary-submit" type="submit" disabled={busy || !firebaseConfigured}>{busy ? "One moment…" : mode === "signup" ? "Create your free account" : mode === "upgrade" ? "Link and save my shelf" : mode === "reset" ? "Send reset link" : "Sign in"}</button>
+          <button className="primary-submit" type="submit" disabled={busy || !firebaseConfigured || !services}>
+            {busy ? "One moment…" : !services && firebaseConfigured ? "Connecting to Firebase…" : mode === "signup" ? "Create your free account" : mode === "upgrade" ? "Link and save my shelf" : mode === "reset" ? "Send reset link" : "Sign in"}
+          </button>
         </form>
         <div className="auth-switches">
           {mode === "signin" && <><button onClick={() => { setMode("reset"); setError(""); setNotice(""); }}>Forgot password?</button>
@@ -880,7 +948,7 @@ function AuthDialog({ services, currentUser, onClose, onAuthenticated = onClose,
             {!upgrading && <button onClick={() => { setMode("signin"); setError(""); setNotice(""); }}>Sign in</button>}</>}
           {mode === "reset" && <button onClick={() => { setMode("signin"); setError(""); setNotice(""); }}>Back to sign in</button>}
         </div>
-        {!firebaseConfigured && <p className="auth-setup-note">This site is not connected to Firebase yet. Follow SETUP.md in the project source, then add your web-app configuration to the ignored .env.local file.</p>}
+        {!firebaseConfigured && <p className="auth-setup-note">This deployment was built without Firebase configuration{missingFirebaseConfig.length ? ` (${missingFirebaseConfig.join(", ")})` : ""}. Add the missing values to this repository's Actions variables or secrets and rerun the Pages workflow. For local development, set them in .env.local.</p>}
       </section>
     </div>
   );
@@ -1089,9 +1157,10 @@ function AuthRoute({ mode }) {
   return <div className="auth-page">
     <div className="auth-page-note"><p className="eyebrow">YOUR SPACE, YOUR PACE</p><h1>A shelf that<br /><em>knows your place.</em></h1>
       <p>Save a good source. Keep a little progress. Come back when you’re ready.</p></div>
-    <AuthDialog services={study.firebaseServices} currentUser={study.user} initialMode={mode}
+    <AuthDialog services={study.firebaseServices} currentUser={study.user} connectionError={study.syncError}
+      onRetry={study.retryFirebase} initialMode={mode}
       onClose={() => navigate("/", { replace: true })}
-      onAuthenticated={() => navigate(from, { replace: true })} />
+    />
   </div>;
 }
 
@@ -1203,7 +1272,7 @@ function DashboardOverviewRoute() {
 
 function DashboardLibraryRoute() {
   const { savedIds, toggleSaved } = useStudy();
-  return <BookPage savedIds={savedIds} onToggleSaved={toggleSaved} initialSavedOnly />;
+  return <BookPage savedIds={savedIds} onToggleSaved={toggleSaved} privateLibrary />;
 }
 
 function DashboardProgressRoute() {
@@ -1468,6 +1537,9 @@ function App() {
     for (const bookSnapshot of booksSnapshot.docs) {
       const book = bookSnapshot.data();
       if (book.storagePath) {
+        if (!firebaseServices.storage || !firebaseServices.ref || !firebaseServices.deleteObject) {
+          throw new Error("This account has private PDFs, but Firebase Storage is not configured in this deployment. Configure the Storage bucket, then retry deletion so those files can be removed safely.");
+        }
         try {
           await firebaseServices.deleteObject(firebaseServices.ref(firebaseServices.storage, book.storagePath));
         } catch (storageError) {
@@ -1591,7 +1663,7 @@ const router = createBrowserRouter([{
     },
     { path: "*", element: <NotFoundPage /> },
   ],
-}]);
+}], { basename: import.meta.env.BASE_URL });
 root.render(<React.StrictMode><RouterProvider router={router} /></React.StrictMode>);
 
 if (import.meta.hot) {

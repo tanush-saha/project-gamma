@@ -1,12 +1,14 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
     match /users/{userId} {
       function isProfileOwner() {
         return request.auth != null && request.auth.uid == userId;
       }
 
-      allow read: if isProfileOwner();
+      allow read, delete: if isProfileOwner();
+      
       allow create, update: if isProfileOwner()
         && request.resource.data.keys().hasOnly([
           'savedBookIds',
@@ -20,20 +22,25 @@ service cloud.firestore {
           'completedUnitIds',
           'updatedAt'
         ])
+        // Type and structural integrity constraints
         && request.resource.data.savedBookIds is list
         && request.resource.data.savedBookIds.size() <= 5000
         && request.resource.data.completedUnitIds is list
         && request.resource.data.completedUnitIds.size() <= 5000
+        // Enforce that updates don't spoof system clocks
+        && request.resource.data.updatedAt == request.time
+        // Optional enum constraints
         && (!('theme' in request.resource.data)
           || request.resource.data.theme in ['focus', 'day'])
         && (!('preferredStream' in request.resource.data)
           || request.resource.data.preferredStream in ['PCM', 'PCB', 'Commerce', 'Humanities']);
-      allow delete: if isProfileOwner();
 
+      // Subcollection: Saved Books
       match /savedBooks/{bookId} {
         allow read, write: if isProfileOwner();
       }
 
+      // Subcollection: Book Progress
       match /bookProgress/{bookId} {
         function hasValidBookProgress() {
           return request.resource.data.keys().hasOnly(['percent', 'updatedAt'])
@@ -41,13 +48,15 @@ service cloud.firestore {
             && request.resource.data.percent is int
             && request.resource.data.percent >= 0
             && request.resource.data.percent <= 100
-            && request.resource.data.updatedAt is timestamp;
+            // Secure timestamp to actual transaction execution time
+            && request.resource.data.updatedAt == request.time;
         }
 
         allow read, delete: if isProfileOwner();
         allow create, update: if isProfileOwner() && hasValidBookProgress();
       }
 
+      // Subcollection: Books Metadata
       match /books/{bookId} {
         function hasValidBookMetadata() {
           return request.resource.data.keys().hasOnly([
@@ -73,11 +82,12 @@ service cloud.firestore {
             && request.resource.data.originalName.size() <= 255
             && request.resource.data.size is int
             && request.resource.data.size > 7
+            // Max size limit (20MB)
             && request.resource.data.size <= 20 * 1024 * 1024
             && request.resource.data.contentType == 'application/pdf'
-            && request.resource.data.storagePath
-              == 'users/' + userId + '/books/' + bookId + '.pdf'
-            && request.resource.data.createdAt is timestamp;
+            // Explicit check to verify users only link their own Cloud Storage folder path
+            && request.resource.data.storagePath == 'users/' + userId + '/books/' + bookId + '.pdf'
+            && request.resource.data.createdAt == request.time;
         }
 
         allow read, delete: if isProfileOwner();

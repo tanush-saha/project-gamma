@@ -1,59 +1,57 @@
 # Study Shelf
 
-Study Shelf is a reading and study product for PCM, PCB, Commerce, and
-Humanities learners. The public homepage introduces the product and lets
-visitors discover official and openly available book sources. A Firebase
-account opens a private workspace with saved books, study progress, and a
-personal cloud PDF shelf.
+Study Shelf is a React + Vite reading and study product for PCM, PCB,
+Commerce, and Humanities learners. GitHub Pages publishes the public site;
+Firebase provides authentication and the private cloud workspace.
 
-## Stack
+## Features
 
-- React + Vite for the app.
-- React Router browser routes with a persistent, guarded nested workspace.
-- Firebase Hosting for deployment.
-- Firebase Authentication for email/password and Google sign-in.
-- Firebase Analytics, when supported by the browser.
-- Cloud Firestore for per-user profile, saved-book IDs, progress IDs, and PDF
-  metadata, plus owner-scoped per-book reading-progress records.
-- Optional Firebase Cloud Storage for personal PDFs, protected by owner-only
-  rules. Storage currently requires Firebase's billing-enabled Blaze plan;
-  no-cost usage may apply, but billing is not a hard spending cap.
+- Public home, source library, book details, and product/legal pages.
+- A login-only study library with curated source links, plus a responsive
+  protected workspace with saved books and study progress.
+- Firebase email/password and Google sign-in.
+- Owner-scoped Firestore profiles, saved books, progress, and PDF metadata.
+- Optional private Firebase Storage shelf for PDFs (up to 20 MB per file).
+- Automatic GitHub Pages deployment from the `main` branch.
 
-Personal PDF upload is limited to 20 MB per file and is private to the
-authenticated owner. Account settings include display name, preferred stream,
-day/focus appearance, sign-out, and a reauthenticated account deletion flow.
-Public pages include source discovery, book details, about, privacy, and terms.
-The product does not currently run OCR, AI book analysis, semantic search,
-bulk ingestion, public uploads, simulations, or 3D models.
-Firebase plan eligibility, quotas, and pricing can change; confirm current
-requirements in Firebase Console before enabling Storage or billing.
+Study Shelf links to books and learning resources at their providers; it does
+not host third-party books. Storage may require Firebase billing. Check current
+Firebase plans and usage before enabling it.
+The local `MATHS/` folder is excluded from GitHub Pages; its PDFs are not
+published. Only upload files to the private PDF shelf if you own them or have
+permission to store them.
 
 ## Run locally
 
-1. Install Node.js 20 or newer.
-2. Run `npm install`.
-3. Copy `.env.example` to `.env.local` and add your Firebase **web app**
-   configuration. Never add an Admin SDK key or service-account JSON.
-4. Run `npm run dev`.
+1. Install Node.js 20 or newer and run `npm install`.
+2. Copy `.env.example` to `.env.local` and fill in the Firebase Web app
+   configuration.
+3. Run `npm run dev`.
 
-The local Vite server and Firebase Hosting both serve real paths such as
-`/book/chemistry-openstax` and `/dashboard/progress`; Firebase Hosting rewrites
-those page requests to the React app entry point.
+Never put Firebase Admin credentials, service-account JSON, private keys,
+passwords, or access tokens in this client application.
 
-## Deploy
+## Publish on GitHub Pages
 
-Follow [SETUP.md](./SETUP.md) for Firebase project setup, Authentication,
-Firestore and Storage rules, secrets guidance, and Firebase Hosting deployment.
+Follow [SETUP.md](./SETUP.md) to enable Firebase Authentication, add the
+Firebase Web app values as GitHub Actions repository variables or secrets, and select
+**GitHub Actions** as the Pages deployment source. Push to `main`; the
+workflow builds the app with its repository URL base path and deploys it.
 
-In short, after setup (include `storage` only if you enabled Firebase Storage):
+The workflow also creates the `404.html` fallback needed for React Router
+routes on GitHub Pages. Firebase Web app configuration is embedded in the
+browser bundle; it is client configuration, not an Admin credential.
+
+## Firebase Hosting (optional alternative)
+
+To serve the app from Firebase Hosting instead, configure `.env.local`, run
+`npm run build`, then deploy with the Firebase CLI. This root-path build is
+separate from the GitHub Pages build:
 
 ```powershell
 npm run build
-npx firebase-tools deploy --only hosting,firestore:rules,storage
+npx firebase-tools deploy --only hosting,firestore:rules
 ```
 
-Without Storage, deploy with `npx firebase-tools deploy --only hosting,firestore:rules`.
-
-GitHub is optional source-code hosting; the deployment target is Firebase
-Hosting. The Firebase CLI publishes `dist/`. Do not upload `.env.local`,
-private PDFs, account credentials, or service-account files to GitHub.
+Add `,storage` only if you configured Firebase Cloud Storage. See
+[SETUP.md](./SETUP.md) for rule deployment and account setup.

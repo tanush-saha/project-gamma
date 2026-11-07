@@ -8,14 +8,19 @@ const config = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
-export const firebaseConfigured = [
-  config.apiKey,
-  config.authDomain,
-  config.projectId,
-  config.storageBucket,
-  config.messagingSenderId,
-  config.appId,
-].every(Boolean);
+const requiredConfig = [
+  ["VITE_FIREBASE_API_KEY", config.apiKey],
+  ["VITE_FIREBASE_AUTH_DOMAIN", config.authDomain],
+  ["VITE_FIREBASE_PROJECT_ID", config.projectId],
+  ["VITE_FIREBASE_APP_ID", config.appId],
+];
+const isConfiguredValue = (value) => typeof value === "string"
+  && value.trim().length > 0
+  && !/^(your-|replace-|<|example)/i.test(value.trim());
+export const missingFirebaseConfig = requiredConfig
+  .filter(([, value]) => !isConfiguredValue(value))
+  .map(([name]) => name);
+export const firebaseConfigured = missingFirebaseConfig.length === 0;
 
 let firebasePromise;
 
@@ -29,19 +34,24 @@ export function loadFirebase() {
       import("firebase/app"),
       import("firebase/auth"),
       import("firebase/firestore"),
-      import("firebase/storage"),
-    ]).then(([appSdk, authSdk, firestoreSdk, storageSdk]) => {
-      const app = appSdk.getApps()[0] || appSdk.initializeApp(config);
+    ]).then(async ([appSdk, authSdk, firestoreSdk]) => {
+      const appOptions = Object.fromEntries(Object.entries(config).filter(([, value]) => isConfiguredValue(value)));
+      const app = appSdk.getApps()[0] || appSdk.initializeApp(appOptions);
       const services = {
         auth: authSdk.getAuth(app),
         db: firestoreSdk.getFirestore(app),
-        storage: storageSdk.getStorage(app),
         ...authSdk,
         ...firestoreSdk,
-        ...storageSdk,
+        storage: null,
       };
 
-      if (config.measurementId) {
+      if (isConfiguredValue(config.storageBucket)) {
+        const storageSdk = await import("firebase/storage");
+        services.storage = storageSdk.getStorage(app, `gs://${config.storageBucket}`);
+        Object.assign(services, storageSdk);
+      }
+
+      if (isConfiguredValue(config.measurementId)) {
         services.analytics = import("firebase/analytics")
           .then(async (analyticsSdk) => {
             if (!await analyticsSdk.isSupported()) return null;
