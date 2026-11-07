@@ -1,0 +1,17 @@
+name = "study-shelf-community"
+main = "worker.js"
+compatibility_date = "2025-11-21"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "study-shelf-community"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "BOOKS"
+bucket_name = "study-shelf-books"
+
+[vars]
+FIREBASE_PROJECT_ID = "REPLACE_WITH_YOUR_FIREBASE_PROJECT_ID"
+ALLOWED_ORIGINS = "https://YOUR-USERNAME.github.io,http://localhost:5173,http://127.0.0.1:5173"
+MAX_UPLOADS_PER_DAY = "5"

@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      function isProfileOwner() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+
+      allow read: if isProfileOwner();
+      allow create, update: if isProfileOwner()
+        && request.resource.data.keys().hasOnly([
+          'savedBookIds',
+          'completedUnitIds',
+          'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'savedBookIds',
+          'completedUnitIds',
+          'updatedAt'
+        ])
+        && request.resource.data.savedBookIds is list
+        && request.resource.data.savedBookIds.size() <= 5000
+        && request.resource.data.completedUnitIds is list
+        && request.resource.data.completedUnitIds.size() <= 5000;
+      allow delete: if false;
+
+      // Allows the previous anonymous shelf to migrate its old saved-book list.
+      match /savedBooks/{bookId} {
+        allow read, write: if isProfileOwner();
+      }
+    }
+  }
+}
