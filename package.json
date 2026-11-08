@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/verify-firebase-config.mjs && vite build",
     "build:pages": "node scripts/verify-firebase-config.mjs && vite build && node scripts/prepare-github-pages.mjs",
     "preview": "vite preview"
   },
@@ -14,10 +14,16 @@
     "vite": "^6.3.5"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.2",
     "firebase": "^11.10.0",
+    "framer-motion": "^11.0.0",
+    "gsap": "^3.13.0",
+    "lucide-react": "^0.5.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.18.5"
+    "react-router-dom": "^7.18.5",
+    "three": "^0.187.0"
   },
   "overrides": {
     "@grpc/grpc-js": "1.14.7"

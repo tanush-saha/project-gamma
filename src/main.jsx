@@ -1,11 +1,15 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { AnimatePresence, motion } from "framer-motion";
 import { createBrowserRouter, Link, Navigate, Outlet, RouterProvider, useLocation, useNavigate, useParams } from "react-router-dom";
+import { CustomCursor } from "./components/cursor/CustomCursor";
+import { EntrySequence } from "./components/EntrySequence.jsx";
 import { openBooks } from "./books.js";
 import { courses, publicTextbooks, textbookCaution } from "./curriculum.js";
 import { firebaseConfigured, loadFirebase, missingFirebaseConfig } from "./firebase.js";
 import { Badge, Button, Card, EmptyState, ProgressBar, Skeleton, Tabs, ThemeToggle, Toast } from "./components/ui.jsx";
 import "./styles.css";
+import "./immersive.css";
 
 const tracks = [
   { id: "PCM", name: "Physics · Chemistry · Maths", short: "PCM", mark: "∑" },
@@ -13,6 +17,7 @@ const tracks = [
   { id: "Commerce", name: "Commerce", short: "COM", mark: "↗" },
   { id: "Humanities", name: "Humanities", short: "HUM", mark: "¶" },
 ];
+const BookScene = React.lazy(() => import("./BookScene.jsx"));
 const guestStorageKey = "study-shelf-profile-v2";
 const StudyContext = createContext(null);
 
@@ -72,33 +77,6 @@ function Brand() {
 }
 
 function MotionEffects() {
-  const cursorRef = useRef(null);
-  const cursorDotRef = useRef(null);
-
-  useEffect(() => {
-    const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
-    if (!finePointer.matches || motionPreference.matches) return undefined;
-
-    const moveCursor = (event) => {
-      const position = `translate3d(${event.clientX}px, ${event.clientY}px, 0) translate(-50%, -50%)`;
-      if (cursorRef.current) cursorRef.current.style.transform = position;
-      if (cursorDotRef.current) cursorDotRef.current.style.transform = position;
-    };
-    const markInteractive = (event) => {
-      if (!cursorRef.current) return;
-      cursorRef.current.classList.toggle("cursor-hover", Boolean(event.target.closest("a, button, summary, [role='button']")));
-    };
-    window.addEventListener("pointermove", moveCursor, { passive: true });
-    document.addEventListener("pointerover", markInteractive);
-    document.documentElement.classList.add("cursor-ready");
-    return () => {
-      window.removeEventListener("pointermove", moveCursor);
-      document.removeEventListener("pointerover", markInteractive);
-      document.documentElement.classList.remove("cursor-ready");
-    };
-  }, []);
-
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     if (reducedMotion.matches) {
@@ -157,11 +135,7 @@ function MotionEffects() {
     };
   }, []);
 
-  return <>
-    <div className="scroll-progress" aria-hidden="true" />
-    <div className="custom-cursor" ref={cursorRef} aria-hidden="true"><span /></div>
-    <div className="custom-cursor-dot" ref={cursorDotRef} aria-hidden="true" />
-  </>;
+  return <div className="scroll-progress" aria-hidden="true" />;
 }
 
 function Header({ user, route, savedCount, onSignOut, syncError }) {
@@ -174,6 +148,7 @@ function Header({ user, route, savedCount, onSignOut, syncError }) {
         <nav className="topnav" aria-label="Main navigation">
           <Link to="/" aria-current={isCurrent("/") ? "page" : undefined}>Home</Link>
           <Link to="/library" aria-current={isCurrent("/library") ? "page" : undefined}>Discover</Link>
+          <Link to="/community" aria-current={isCurrent("/community") ? "page" : undefined}>Community PDFs</Link>
           {user && !user.isAnonymous && <>
             <Link to="/dashboard" aria-current={isCurrent("/dashboard") ? "page" : undefined}>Workspace</Link>
             <Link to="/dashboard/progress" aria-current={isCurrent("/dashboard/progress") ? "page" : undefined}>Study map</Link>
@@ -207,6 +182,7 @@ function Footer({ user }) {
       <p>Made for the next question.</p>
       <nav className="footer-navigation" aria-label="More pages">
         <Link to="/">Home</Link><Link to="/library">Discover books</Link>
+        <Link to="/community">Community PDFs</Link>
         <Link to="/about">About</Link><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link>
         {(!user || user.isAnonymous) && <><Link to="/login">Sign in</Link><Link to="/signup">Create account</Link></>}
         {user && !user.isAnonymous && <><Link to="/dashboard">Workspace</Link><Link to="/dashboard/progress">Study map</Link>
@@ -215,6 +191,22 @@ function Footer({ user }) {
       <span className="footer-small">© 2026 STUDY SHELF · READ WITH CURIOSITY</span>
     </footer>
   );
+}
+
+class VisualErrorBoundary extends React.Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error) {
+    console.error("The 3D book scene could not be rendered; using the static illustration.", error);
+  }
+
+  render() {
+    return this.state.hasError ? null : this.props.children;
+  }
 }
 
 function HomePage({ onChooseTrack, savedCount, savedIds, onToggleSaved, onSearchSources, completedCount, user }) {
@@ -238,30 +230,32 @@ function HomePage({ onChooseTrack, savedCount, savedIds, onToggleSaved, onSearch
     <>
       <section className="hero" data-reveal>
         <div className="hero-copy">
-          <p className="eyebrow"><span className="eyebrow-dot" /> A little more curious, every day</p>
+          <p className="eyebrow"><span className="eyebrow-dot" /> A LITTLE MORE CURIOUS, EVERY DAY</p>
           <h1>Read deeper.<br /><em>Find your way.</em></h1>
           <p className="hero-description">
             A thoughtful home for books, ideas and study momentum across PCM, PCB, Commerce and Humanities.
             Find a good source, follow your syllabus, and pick up where you left off.
           </p>
           <Link className="hero-cta" to={user ? "/dashboard" : "/signup"}>
-            {user ? "Open your workspace" : "Step into your space"} <span aria-hidden="true">↘</span></Link>
+            {user ? "Open your workspace" : "Enter your study universe"} <span aria-hidden="true">↗</span></Link>
           <Link className="hero-secondary-link" to="/library">Explore the open library <span aria-hidden="true">↗</span></Link>
           <div className="hero-footnote"><span className="footnote-line" /><span>Good books. Thoughtfully found. Progress that stays yours.</span></div>
         </div>
-        <div className="hero-art" aria-label="Illustration of a stack of books" role="img"
+        <div className="hero-art" aria-label="A luminous constellation of floating books" role="img"
           onPointerMove={moveHeroArtwork} onPointerLeave={resetHeroArtwork}>
-          <div className="art-sun" /><span className="art-orbit orbit-one" /><span className="art-orbit orbit-two" />
-          <div className="art-note note-top">READ<br />WIDELY</div><div className="art-note note-bottom">STAY<br />CURIOUS</div>
-          <div className="book-stack">
-            <div className="book book-back"><span>THE ART OF ASKING</span><i>✳</i></div>
-            <div className="book book-middle"><span>THINK IN<br />SYSTEMS</span><i>∿</i></div>
-            <div className="book book-front"><span>A FIELD GUIDE<br />TO IDEAS</span><i>⌁</i></div>
+          <div className="hero-scene">
+            <VisualErrorBoundary><React.Suspense fallback={null}><BookScene /></React.Suspense></VisualErrorBoundary>
+          </div>
+          <div className="hero-scene-fallback" aria-hidden="true">
+            <div className="fallback-orbit fallback-orbit-one" />
+            <div className="fallback-orbit fallback-orbit-two" />
+            <div className="fallback-book fallback-book-back" />
+            <div className="fallback-book fallback-book-front" />
           </div>
           <span className="art-caption">YOUR NEXT CHAPTER STARTS HERE</span>
-          <span className="art-sparkle sparkle-one">✳</span><span className="art-sparkle sparkle-two">✳</span>
         </div>
         <div className="hero-index"><span>BUILT FOR</span> / YOUR NEXT PAGE</div>
+        <a className="hero-scroll-cue" href="#how-it-works"><span /> SCROLL TO EXPLORE</a>
       </section>
       <div className="ticker" aria-label="A good place to start"><div className="ticker-track">
         {Array.from({ length: 4 }, (_, index) => <span key={index}>FOLLOW THE QUESTION <b>✳</b> TRY SOMETHING NEW <b>✳</b></span>)}
@@ -287,7 +281,7 @@ function HomePage({ onChooseTrack, savedCount, savedIds, onToggleSaved, onSearch
             event.preventDefault();
             onSearchSources(sourceSearch);
           }}>
-            <label className="sr-only" htmlFor="home-source-search">Search open books</label>
+            <label className="sr-only" htmlFor="home-source-search">Search open learning resources</label>
             <input id="home-source-search" type="search" value={sourceSearch} onChange={(event) => setSourceSearch(event.target.value)}
               placeholder="Search a subject or title" />
             <button type="submit" aria-label="Search the open library">Search ↗</button>
@@ -307,6 +301,23 @@ function HomePage({ onChooseTrack, savedCount, savedIds, onToggleSaved, onSearch
           <h3>Your learning, in one place.</h3><p>Your account brings your saved reading and study progress along when you switch devices.</p><strong>{user ? "Open your personal shelf ↗" : "Create a free account ↗"}</strong></Link>
         <Link className="feature-card" to={user ? "/dashboard/progress" : "/signup"}><span className="feature-index">04 / KEEP YOUR PLACE</span><span className="feature-mark">↗</span>
           <h3>Pick up where you left off.</h3><p>Your private study map and, if you enable Firebase Storage, your cloud PDF shelf are there when you sign in.</p><strong>{user ? "Continue learning ↗" : "Create an account ↗"}</strong></Link>
+      </section>
+      <section className="workspace-preview page-wrap" data-reveal>
+        <div className="workspace-preview-copy">
+          <p className="eyebrow"><span className="eyebrow-dot" /> A QUIETER KIND OF MOMENTUM</p>
+          <h2>Your own corner<br /><em>of the universe.</em></h2>
+          <p>Saved books, a gentle study map, and your own place to pick up the thread. Progress stays yours, wherever you go.</p>
+          <Link className="hero-cta" to={user ? "/dashboard" : "/signup"}>{user ? "Return to your workspace" : "Make a space of your own"} <span aria-hidden="true">↗</span></Link>
+        </div>
+        <div className="workspace-preview-scene" aria-hidden="true">
+          <div className="preview-orbit preview-orbit-one" />
+          <div className="preview-orbit preview-orbit-two" />
+          <div className="preview-book preview-book-one"><span>PHYSICS</span><i>01</i></div>
+          <div className="preview-book preview-book-two"><span>FIELD NOTES</span><i>02</i></div>
+          <div className="preview-book preview-book-three"><span>THE HUMAN<br />QUESTION</span><i>03</i></div>
+          <div className="preview-progress"><span>YOUR STUDY MAP</span><strong>{completedCount.toString().padStart(2, "0")}</strong><small>TOPICS IN MOTION</small><i style={{ "--progress": `${completionPercent}%` }} /></div>
+          <span className="preview-caption">A SMALL STEP IS STILL A STEP</span>
+        </div>
       </section>
       <section className="manifesto"><div className="manifesto-shape" aria-hidden="true">S</div>
         <p className="eyebrow">A NOTE FROM THE SHELF</p><h2>Learning isn’t a<br />race to the <em>last page.</em></h2>
@@ -464,7 +475,7 @@ function BookCard({ book, saved, onToggle, style }) {
         aria-label={`View details for ${book.title}`}>
         <span className="cover-topline">{book.type === "official" ? `${book.publisher} · OFFICIAL` : book.publisher} <span>·</span> {book.number}</span>
         <span className="cover-orb" /><span className="cover-title">{book.cover}</span>
-        <span className="cover-bottomline">{book.publicPath ? "AVAILABLE ON THIS SITE" : "OPEN AT SOURCE"}</span>
+        <span className="cover-bottomline">{book.publicPath ? "AVAILABLE ON THIS SITE" : book.type === "reference" ? "FIND AN EDITION" : "OPEN AT SOURCE"}</span>
         <span className="cover-open" aria-hidden="true">↗</span>
       </Link>
       <div className="book-details">
@@ -472,7 +483,7 @@ function BookCard({ book, saved, onToggle, style }) {
         <h3><Link to={`/book/${book.id}`}>{book.title}</Link></h3><p className="book-author">By {book.author}</p>
         <p className="book-description">{book.description}</p>
         <div className="book-actions">
-          <a className="source-link" href={link} target="_blank" rel="noreferrer">
+          <a className="source-link" href={link} target="_blank" rel="noopener noreferrer">
             {book.publicPath ? "Read or download PDF" : book.source}<span aria-hidden="true"> ↗</span>
           </a>
           <button className={`bookmark-button ${saved ? "is-saved" : ""}`} onClick={() => onToggle(book)}
@@ -489,6 +500,7 @@ function BookPage({ savedIds, onToggleSaved, initialSavedOnly = false, privateLi
   const [grade, setGrade] = useState("all");
   const [subject, setSubject] = useState("all");
   const [sourceType, setSourceType] = useState("all");
+  const [examFocus, setExamFocus] = useState("all");
   const [sort, setSort] = useState("recommended");
   const [search, setSearch] = useState(() => new URLSearchParams(location.search).get("q") || "");
   const [savedOnly, setSavedOnly] = useState(initialSavedOnly);
@@ -496,20 +508,26 @@ function BookPage({ savedIds, onToggleSaved, initialSavedOnly = false, privateLi
   useEffect(() => {
     setSearch(new URLSearchParams(location.search).get("q") || "");
   }, [location.search]);
+  useEffect(() => {
+    setVisibleCount(12);
+  }, [examFocus, grade, savedOnly, search, sort, sourceType, subject, track]);
   const visibleBooks = useMemo(() => {
     const query = search.trim().toLowerCase();
     return [...publicTextbooks, ...openBooks]
       .filter((book) => belongsToTrack(book, track))
       .filter((book) => grade === "all" || book.level.includes(grade))
       .filter((book) => subject === "all" || getBookSubjects(book).includes(subject))
-      .filter((book) => sourceType === "all" || (sourceType === "official" ? book.type === "official" : book.type !== "official"))
+      .filter((book) => sourceType === "all"
+        || (sourceType === "official" ? book.type === "official"
+          : sourceType === "reference" ? book.type === "reference" : book.type !== "official" && book.type !== "reference"))
+      .filter((book) => examFocus === "all" || !book.examFocus || book.examFocus.includes(examFocus))
       .filter((book) => !savedOnly || savedIds.includes(book.id))
-      .filter((book) => !query || [book.title, ...getBookSubjects(book), book.publisher, book.description]
+      .filter((book) => !query || [book.title, book.author, book.level, book.examFocus?.join(" "), ...getBookSubjects(book), book.publisher, book.description]
         .join(" ").toLowerCase().includes(query))
       .sort((a, b) => sort === "title" ? a.title.localeCompare(b.title)
         : sort === "subject" ? a.subject.localeCompare(b.subject) || a.title.localeCompare(b.title)
           : 0);
-  }, [grade, savedIds, savedOnly, search, sort, sourceType, subject, track]);
+  }, [examFocus, grade, savedIds, savedOnly, search, sort, sourceType, subject, track]);
   const displayedBooks = visibleBooks.slice(0, visibleCount);
 
   return (
@@ -526,17 +544,21 @@ function BookPage({ savedIds, onToggleSaved, initialSavedOnly = false, privateLi
         <label className="grade-filter"><span>SUBJECT</span><select value={subject} onChange={(event) => setSubject(event.target.value)}>
           <option value="all">All subjects</option>{[...new Set([...publicTextbooks, ...openBooks].flatMap(getBookSubjects))].sort().map((name) => <option key={name}>{name}</option>)}</select></label>
         <label className="grade-filter"><span>SOURCE</span><select value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
-          <option value="all">All sources</option><option value="official">Official sources</option><option value="open">Open / third-party</option></select></label>
+          <option value="all">All sources</option><option value="official">Official sources</option>
+          <option value="open">Open resources</option><option value="reference">Book editions</option></select></label>
+        <label className="grade-filter"><span>EXAM</span><select value={examFocus} onChange={(event) => setExamFocus(event.target.value)}>
+          <option value="all">All exams</option><option value="JEE">JEE</option><option value="NEET">NEET</option></select></label>
         <label className="grade-filter"><span>SORT</span><select value={sort} onChange={(event) => setSort(event.target.value)}>
           <option value="recommended">Recommended</option><option value="title">Title A–Z</option><option value="subject">Subject</option></select></label>
         <label className="book-search"><span className="sr-only">Search books</span><input value={search} onChange={(event) => setSearch(event.target.value)}
-          type="search" placeholder="Search title or subject" /></label>
+          type="search" placeholder="Search title, author, or subject" /></label>
         <button className={`saved-only-button ${savedOnly ? "filter-on" : ""}`} onClick={() => setSavedOnly((current) => !current)}>
           {savedOnly ? "Saved only ✳" : `Saved · ${savedIds.length}`}
         </button>
       </div>
-      <div className="catalog-heading"><span>{savedOnly ? "YOUR SAVED BOOKS" : `${tracks.find((item) => item.id === track)?.name || "ALL STUDY PATHS"} · CURATED SOURCES`}</span>
-        <span>{visibleBooks.length} books</span></div>
+      <div className="catalog-heading"><span>{savedOnly ? "YOUR SAVED BOOKS"
+        : `${examFocus === "all" ? tracks.find((item) => item.id === track)?.name || "ALL STUDY PATHS" : `${examFocus} FOCUS`} · CURATED SOURCES`}</span>
+        <span>{visibleBooks.length} {visibleBooks.length === 1 ? "resource" : "resources"}</span></div>
       <div className="book-grid">
         {displayedBooks.map((book, index) => <BookCard key={book.id} book={book} saved={savedIds.includes(book.id)}
           onToggle={onToggleSaved} style={{ "--card-index": index }} />)}
@@ -544,15 +566,27 @@ function BookPage({ savedIds, onToggleSaved, initialSavedOnly = false, privateLi
       {visibleBooks.length > displayedBooks.length && <button className="load-more-button" onClick={() => setVisibleCount((count) => count + 12)}>
         Show more sources · {visibleBooks.length - displayedBooks.length} remaining ↘
       </button>}
-      {!visibleBooks.length && <EmptyState title={savedOnly ? "Your reading list is ready to grow." : "No books in this search."}>
-        {savedOnly ? "Save a title from the open library and it will be waiting here." : "Try another subject, title, or class."}
-      </EmptyState>}
-      <div className="rights-note"><span>READ IT FROM THE SOURCE</span><p>Study Shelf links to publishers, institutions, and other identified providers; it does not host these resources. Availability and reuse terms vary, especially for third-party study material. Check the source's terms and the current CBSE syllabus before relying on a resource.</p></div>
+      {!visibleBooks.length && <>
+        <EmptyState title={savedOnly ? "Your reading list is ready to grow." : "No resources match this search."}>
+          {savedOnly ? "Save a title from the open library and it will be waiting here." : "Try another subject, title, exam, or class."}
+        </EmptyState>
+        <button className="load-more-button" type="button" onClick={() => {
+          setTrack("all");
+          setGrade("all");
+          setSubject("all");
+          setSourceType("all");
+          setExamFocus("all");
+          setSort("recommended");
+          setSearch("");
+          setSavedOnly(false);
+        }}>Clear all filters</button>
+      </>}
+      <div className="rights-note"><span>READ IT FROM THE SOURCE</span><p>Study Shelf does not host third-party books. Open resources link to their providers; reference-book links search Google Books for legitimate editions and available previews. Availability and reuse terms vary. Check the current exam syllabus before relying on a resource.</p></div>
     </section>
   );
 }
 
-function CloudShelfPage({ user, services, firebaseReady }) {
+function CloudShelfPage({ user, services, firebaseReady, shared = false }) {
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -568,20 +602,34 @@ function CloudShelfPage({ user, services, firebaseReady }) {
 
   useEffect(() => {
     let active = true;
-    if (!services || !user || !firebaseReady) return undefined;
+    if (!firebaseReady) return undefined;
+    if (!services) {
+      setError("Firebase is not configured for this deployment. Configure Firebase Firestore and Storage to use cloud PDFs.");
+      setLoading(false);
+      return undefined;
+    }
+    if (!shared && !user) return undefined;
     setLoading(true);
+    setError("");
+    const booksCollection = shared
+      ? services.collection(services.db, "communityBooks")
+      : services.collection(services.db, "users", user.uid, "books");
     services.getDocs(services.query(
-      services.collection(services.db, "users", user.uid, "books"),
+      booksCollection,
       services.orderBy("createdAt", "desc"),
     )).then((snapshot) => {
       if (active) setBooks(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
     }).catch((loadError) => {
-      if (active) setError(`Could not load your cloud shelf: ${loadError.message}`);
+      if (!active) return;
+      const setupHint = loadError.code === "permission-denied"
+        ? " Check that firestore.rules has been deployed to the Firebase project used by this site."
+        : "";
+      setError(`Could not load the ${shared ? "community" : "private"} cloud shelf: ${loadError.message}${setupHint}`);
     }).finally(() => {
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, [firebaseReady, services, user]);
+  }, [firebaseReady, services, shared, user]);
 
   useEffect(() => () => {
     if (reader?.url) URL.revokeObjectURL(reader.url);
@@ -595,8 +643,12 @@ function CloudShelfPage({ user, services, firebaseReady }) {
       setError("Your Firebase account is still connecting. Try again shortly.");
       return;
     }
+    if (!user || user.isAnonymous) {
+      setError("Sign in to upload a PDF to the community shelf.");
+      return;
+    }
     if (!services.storage || !services.ref || !services.uploadBytesResumable) {
-      setError("Firebase sign-in and your study library are available, but cloud PDF uploads are not configured. Add the Storage bucket to the GitHub Actions configuration and enable Firebase Storage; check its current billing requirements first.");
+      setError("Cloud PDF uploads are not configured for this deployment. Add VITE_FIREBASE_STORAGE_BUCKET to its configuration, enable Firebase Storage, and check its billing requirements.");
       return;
     }
 
@@ -629,7 +681,7 @@ function CloudShelfPage({ user, services, firebaseReady }) {
     const totalBytes = validFiles.reduce((total, file) => total + file.size, 0);
     const totalMegabytes = (totalBytes / (1024 * 1024)).toFixed(1);
     if (!window.confirm(
-      `Upload ${validFiles.length} PDF${validFiles.length === 1 ? "" : "s"} (${totalMegabytes} MB total) to your private Firebase shelf? Only upload files you own or are authorized to store. Firebase Storage may incur charges.`,
+      `Upload ${validFiles.length} PDF${validFiles.length === 1 ? "" : "s"} (${totalMegabytes} MB total) to the ${shared ? "public community shelf (visible and downloadable by anyone)" : "private Firebase shelf"}? Only upload files you own or are authorized to ${shared ? "share" : "store"}. Firebase Storage may incur charges.`,
     )) return;
 
     setUploading(true);
@@ -640,7 +692,9 @@ function CloudShelfPage({ user, services, firebaseReady }) {
       for (const [index, file] of validFiles.entries()) {
       setUploadFileProgress(`Uploading ${index + 1} of ${validFiles.length}: ${file.name}`);
       const id = crypto.randomUUID();
-      const storagePath = `users/${user.uid}/books/${id}.pdf`;
+      const storagePath = shared
+        ? `community/${user.uid}/${id}.pdf`
+        : `users/${user.uid}/books/${id}.pdf`;
       const fileRef = services.ref(services.storage, storagePath);
       try {
         const task = services.uploadBytesResumable(fileRef, file, { contentType: "application/pdf" });
@@ -657,10 +711,14 @@ function CloudShelfPage({ user, services, firebaseReady }) {
           size: file.size,
           contentType: "application/pdf",
           storagePath,
+          ...(shared ? { ownerUid: user.uid } : {}),
           createdAt: new Date(),
         };
         try {
-          await services.setDoc(services.doc(services.db, "users", user.uid, "books", id), {
+          const bookRef = shared
+            ? services.doc(services.db, "communityBooks", id)
+            : services.doc(services.db, "users", user.uid, "books", id);
+          await services.setDoc(bookRef, {
             ...metadata,
             createdAt: services.serverTimestamp(),
           });
@@ -681,7 +739,9 @@ function CloudShelfPage({ user, services, firebaseReady }) {
       }
       if (uploadedBooks.length) {
       setBooks((current) => [...uploadedBooks, ...current]);
-      setUploadSummary(`${uploadedBooks.length} PDF${uploadedBooks.length === 1 ? "" : "s"} added to your private shelf.`);
+      setUploadSummary(shared
+        ? `${uploadedBooks.length} PDF${uploadedBooks.length === 1 ? "" : "s"} added to the public shelf for everyone to read.`
+        : `${uploadedBooks.length} PDF${uploadedBooks.length === 1 ? "" : "s"} added to your private shelf.`);
       }
       if (failures.length) {
       setError(`${failures.length} file${failures.length === 1 ? " was" : "s were"} skipped or failed: ${failures.join("; ")}`);
@@ -703,12 +763,12 @@ function CloudShelfPage({ user, services, firebaseReady }) {
       const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
       setReader({ title: book.title, url });
     } catch (readError) {
-      setError(`Could not open this private PDF: ${readError.message}`);
+      setError(`Could not open this PDF: ${readError.message}`);
     }
   }
 
   async function removeBook(book) {
-    if (!window.confirm(`Permanently remove "${book.title}" from your Firebase account? This cannot be undone.`)) return;
+    if (!window.confirm(`Permanently remove "${book.title}" from the ${shared ? "public community shelf" : "your Firebase account"}? This cannot be undone.`)) return;
     if (!services?.storage || !services.ref || !services.deleteObject) {
       setError("Firebase Storage is not configured for this deployment, so this PDF cannot be removed safely.");
       return;
@@ -721,7 +781,10 @@ function CloudShelfPage({ user, services, firebaseReady }) {
       } catch (storageError) {
         if (storageError.code !== "storage/object-not-found") throw storageError;
       }
-      await services.deleteDoc(services.doc(services.db, "users", user.uid, "books", book.id));
+      const bookRef = shared
+        ? services.doc(services.db, "communityBooks", book.id)
+        : services.doc(services.db, "users", user.uid, "books", book.id);
+      await services.deleteDoc(bookRef);
       setBooks((current) => current.filter((entry) => entry.id !== book.id));
     } catch (removeError) {
       setError(`Could not completely remove this PDF: ${removeError.message}`);
@@ -736,7 +799,10 @@ function CloudShelfPage({ user, services, firebaseReady }) {
       return;
     }
     try {
-      await services.updateDoc(services.doc(services.db, "users", user.uid, "books", book.id), { title });
+      const bookRef = shared
+        ? services.doc(services.db, "communityBooks", book.id)
+        : services.doc(services.db, "users", user.uid, "books", book.id);
+      await services.updateDoc(bookRef, { title });
       setBooks((current) => current.map((entry) => entry.id === book.id ? { ...entry, title } : entry));
       setEditingId("");
       setError("");
@@ -747,18 +813,24 @@ function CloudShelfPage({ user, services, firebaseReady }) {
 
   return (
     <section className="page-wrap cloud-shelf-page" data-reveal>
-      <p className="eyebrow"><span className="eyebrow-dot" /> YOUR PRIVATE LIBRARY · FIREBASE CLOUD</p>
-      <div className="page-heading-row"><h1>Your books.<br /><em>Wherever you are.</em></h1>
-        <p>PDFs in this shelf are private to your account and available on your signed-in devices. Original files are kept as uploaded.</p></div>
+      <p className="eyebrow"><span className="eyebrow-dot" /> {shared ? "COMMUNITY LIBRARY · FIREBASE CLOUD" : "YOUR PRIVATE LIBRARY · FIREBASE CLOUD"}</p>
+      <div className="page-heading-row"><h1>{shared ? <>Read together.<br /><em>Share a good find.</em></> : <>Your books.<br /><em>Wherever you are.</em></>}</h1>
+        <p>{shared
+          ? "Browse PDFs uploaded by the community from any device. Every file here is public and downloadable; only share material you have permission to publish."
+          : "PDFs in this shelf are private to your account and available on your signed-in devices. Original files are kept as uploaded."}</p></div>
       <section className="cloud-shelf-panel">
-        <p className="cloud-storage-cost-note">Optional: private PDF storage requires Firebase's billing-enabled Blaze plan. Check current pricing and quotas before uploading; no-cost allowances are not a spending cap.</p>
-        <div className="cloud-shelf-toolbar"><div><p className="eyebrow">PERSONAL FILES · PRIVATE BY DEFAULT</p>
-          <h2>A place for your own<br /><em>reading.</em></h2></div>
+        <p className="cloud-storage-cost-note">{shared
+          ? "Shared PDFs are publicly visible. Firebase Storage may require a billing-enabled plan; check current pricing and quotas before uploading."
+          : "Optional: private PDF storage requires Firebase's billing-enabled Blaze plan. Check current pricing and quotas before uploading; no-cost allowances are not a spending cap."}</p>
+        <div className="cloud-shelf-toolbar"><div><p className="eyebrow">{shared ? "PUBLIC FILES · COMMUNITY SHARED" : "PERSONAL FILES · PRIVATE BY DEFAULT"}</p>
+          <h2>{shared ? <>A place for shared<br /><em>reading.</em></> : <>A place for your own<br /><em>reading.</em></>}</h2></div>
           <div><div className="cloud-upload-actions">
-            <button className="hero-cta" onClick={() => fileInput.current?.click()} disabled={!firebaseReady || uploading || !services?.storage}>
-              {uploading ? `Uploading ${progress}%` : "Choose PDFs"} <span aria-hidden="true">＋</span></button>
-            <button className="cloud-folder-button" onClick={() => folderInput.current?.click()} disabled={!firebaseReady || uploading || !services?.storage}>
-              Choose folder</button>
+            {(!shared || (user && !user.isAnonymous)) ? <>
+              <button className="hero-cta" onClick={() => fileInput.current?.click()} disabled={!firebaseReady || uploading || !services?.storage}>
+                {uploading ? `Uploading ${progress}%` : "Choose PDFs"} <span aria-hidden="true">＋</span></button>
+              <button className="cloud-folder-button" onClick={() => folderInput.current?.click()} disabled={!firebaseReady || uploading || !services?.storage}>
+                Choose folder</button>
+            </> : <Link className="hero-cta" to="/login">Sign in to upload <span aria-hidden="true">↗</span></Link>}
             <input ref={fileInput} className="sr-only" type="file" accept=".pdf,application/pdf" multiple onChange={handleUpload} />
             <input ref={folderInput} className="sr-only" type="file" accept=".pdf,application/pdf" multiple webkitdirectory="" onChange={handleUpload} />
           </div><p className="cloud-shelf-limit">{services?.storage ? "Select multiple PDFs or a folder · 20 MB maximum per PDF" : "Cloud Storage not configured"}</p></div>
@@ -769,7 +841,9 @@ function CloudShelfPage({ user, services, firebaseReady }) {
         {uploadSummary && <p className="cloud-upload-success" role="status">{uploadSummary}</p>}
         {error && <p className="private-error" role="alert">{error}</p>}
         {loading ? <Skeleton className="shelf-skeleton" lines={3} />
-          : books.length === 0 ? <EmptyState title="Your cloud shelf is empty.">Add a PDF you own or are authorized to store.</EmptyState>
+          : error && books.length === 0 ? null
+            : books.length === 0 ? <EmptyState title={shared ? "The community shelf is ready for its first PDF." : "Your cloud shelf is empty."}>
+            {shared ? "Sign in to share a PDF you own or are authorized to publish." : "Add a PDF you own or are authorized to store."}</EmptyState>
             : <div className="private-book-list">{books.map((book) => (
               <article className="private-book-row" key={book.id}><span className="private-pdf-mark">PDF</span>
                 <div className="private-book-title">{editingId === book.id
@@ -781,11 +855,15 @@ function CloudShelfPage({ user, services, firebaseReady }) {
                   : <strong>{book.title}</strong>}
                   <small>{(book.size / (1024 * 1024)).toFixed(2)} MB · {new Date(book.createdAt?.toDate ? book.createdAt.toDate() : book.createdAt || Date.now()).toLocaleDateString()}</small></div>
                 <button onClick={() => openBook(book)}>Read ↗</button>
-                <button onClick={() => { setEditingId(book.id); setDraftTitle(book.title); }} aria-label={`Rename ${book.title}`}>Rename</button>
-                <button onClick={() => removeBook(book)} aria-label={`Delete ${book.title}`} className="private-delete">Remove</button>
+                {(!shared || book.ownerUid === user?.uid) && <>
+                  <button onClick={() => { setEditingId(book.id); setDraftTitle(book.title); }} aria-label={`Rename ${book.title}`}>Rename</button>
+                  <button onClick={() => removeBook(book)} aria-label={`Delete ${book.title}`} className="private-delete">Remove</button>
+                </>}
               </article>
             ))}</div>}
-        <p className="cloud-shelf-footnote">Files are stored in your Firebase Storage bucket. Never upload a book unless you have permission to store it.</p>
+        <p className="cloud-shelf-footnote">{shared
+          ? "Files are stored in Firebase Storage and are publicly readable. Only upload material you own or have explicit permission to share."
+          : "Files are stored in your Firebase Storage bucket. Never upload a book unless you have permission to store it."}</p>
       </section>
       {reader && <div className="reader-backdrop" role="presentation" onClick={(event) => {
         if (event.target === event.currentTarget) { URL.revokeObjectURL(reader.url); setReader(null); }
@@ -1055,7 +1133,7 @@ function InfoPage({ kind }) {
       sections: [
         ["Find a reliable starting point", "Discover official NCERT textbooks and books that their publishers make openly available. Each reading link takes you to the source."],
         ["Keep a thread, not a score", "Save titles and use the syllabus checklist to remember where you want to return. Your progress is personal, and it is not an exam prediction."],
-        ["Keep private files private", "The optional PDF shelf is for documents you own or have permission to store. Files are restricted to the signed-in account by Firebase rules."],
+        ["Share carefully", "Community PDFs are publicly readable by anyone. Upload only files you own or have explicit permission to publish; use the private PDF shelf for files you are authorized to store privately."],
       ],
     },
     privacy: {
@@ -1065,6 +1143,7 @@ function InfoPage({ kind }) {
       sections: [
         ["Account and profile", "Firebase Authentication processes sign-in details. Firestore stores a signed-in user’s saved book identifiers, completed topic identifiers, private per-book reading percentages, preferred study path, and focus/day theme so these preferences can sync between devices. Guest bookmarks and topic progress stay in this browser’s local storage."],
         ["Personal PDF shelf", "If you enable Firebase Storage, PDF bytes and their title, filename, size, storage path, and upload date are stored under your account. The shelf is optional; do not upload files you are not authorized to store."],
+        ["Community PDF shelf", "Community uploads are publicly readable and downloadable. Firestore stores each file's title, filename, size, storage path, upload date, and uploader's Firebase user ID. Removing your account also removes your community uploads."],
         ["Analytics and external sources", "Firebase Analytics loads only when a measurement ID is configured and the browser reports support. External book links are provided by publishers or official sources, which have their own privacy policies."],
         ["Your choices", "You can sign out, remove saved books, remove PDFs, and delete your account from workspace settings. Account deletion requires recent authentication and removes this account’s known Firestore and Storage data before deleting its Firebase sign-in."],
       ],
@@ -1074,7 +1153,7 @@ function InfoPage({ kind }) {
       title: <>Learn freely.<br /><em>Respect the source.</em></>,
       description: "Use Study Shelf as a guide to learning and discovery. It is not a substitute for official curriculum advice or professional guidance.",
       sections: [
-        ["Respect copyright", "Study Shelf links to official or openly available sources and does not authorize redistribution of copyrighted books. Upload only material you own or have explicit permission to store."],
+        ["Respect copyright", "Study Shelf links to official or openly available sources and does not authorize redistribution of copyrighted books. Upload to the public community shelf only material you own or have explicit permission to share."],
         ["Use your account responsibly", "Keep your sign-in secure, provide accurate account information, and do not attempt to access another person’s files or disrupt the service."],
         ["Availability and accuracy", "External sources, curricula, and Firebase features can change. Check the original publisher and current education-board materials for authoritative information."],
         ["Cloud costs", "Optional Firebase Storage requires a billing-enabled plan. The project owner is responsible for monitoring usage and any applicable charges."],
@@ -1107,7 +1186,8 @@ function BookDetailPage() {
         <span>{book.publisher}</span><strong>{book.cover}</strong><i>✳</i><small>{book.level}</small>
       </div>
       <div className="book-detail-copy">
-        <p className="eyebrow"><span className="eyebrow-dot" /> {book.type === "official" ? "OFFICIAL SOURCE" : "OPEN / THIRD-PARTY RESOURCE"} · {getBookSubjects(book).join(" · ").toUpperCase()}</p>
+        <p className="eyebrow"><span className="eyebrow-dot" /> {book.type === "official" ? "OFFICIAL SOURCE"
+          : book.type === "reference" ? "REFERENCE BOOK · EDITION SEARCH" : "OPEN / THIRD-PARTY RESOURCE"} · {getBookSubjects(book).join(" · ").toUpperCase()}</p>
         <h1>{book.title}</h1>        <p className="book-detail-author">By {book.author} · {book.level} · {book.track} · {book.language || "Language not specified"}</p>
         <p className="book-detail-description">{book.description}</p>
         <div className="book-detail-actions">
@@ -1318,6 +1398,11 @@ function DashboardShelfRoute() {
   return <CloudShelfPage user={user} services={firebaseServices} firebaseReady={firebaseReady} />;
 }
 
+function CommunityShelfRoute() {
+  const { user, firebaseServices, firebaseReady } = useStudy();
+  return <CloudShelfPage user={user} services={firebaseServices} firebaseReady={firebaseReady} shared />;
+}
+
 function SettingsRoute() {
   const study = useStudy();
   return <AccountPage user={study.user} firebaseReady={study.firebaseReady} onSignOut={study.onSignOut}
@@ -1332,6 +1417,8 @@ function App() {
   const [savedIds, setSavedIds] = useState(guestProfile.savedBookIds);
   const [completedIds, setCompletedIds] = useState(guestProfile.completedUnitIds);
   const [bookProgress, setBookProgress] = useState({});
+  const [entered, setEntered] = useState(false);
+  const handleEntry = useCallback(() => setEntered(true), []);
   const [user, setUser] = useState(null);
   const [, setDisplayNameRefresh] = useState("");
   const [firebaseServices, setFirebaseServices] = useState(null);
@@ -1549,6 +1636,26 @@ function App() {
       await firebaseServices.deleteDoc(bookSnapshot.ref);
     }
 
+    const communityBooksQuery = firebaseServices.query(
+      firebaseServices.collection(firebaseServices.db, "communityBooks"),
+      firebaseServices.where("ownerUid", "==", user.uid),
+    );
+    const communityBooksSnapshot = await firebaseServices.getDocs(communityBooksQuery);
+    for (const bookSnapshot of communityBooksSnapshot.docs) {
+      const book = bookSnapshot.data();
+      if (book.storagePath) {
+        if (!firebaseServices.storage || !firebaseServices.ref || !firebaseServices.deleteObject) {
+          throw new Error("This account has public PDFs, but Firebase Storage is not configured in this deployment. Configure the Storage bucket, then retry deletion.");
+        }
+        try {
+          await firebaseServices.deleteObject(firebaseServices.ref(firebaseServices.storage, book.storagePath));
+        } catch (storageError) {
+          if (storageError.code !== "storage/object-not-found") throw storageError;
+        }
+      }
+      await firebaseServices.deleteDoc(bookSnapshot.ref);
+    }
+
     const legacySavedRef = firebaseServices.collection(firebaseServices.db, "users", user.uid, "savedBooks");
     const legacySavedSnapshot = await firebaseServices.getDocs(legacySavedRef);
     for (const savedBook of legacySavedSnapshot.docs) await firebaseServices.deleteDoc(savedBook.ref);
@@ -1578,6 +1685,7 @@ function App() {
       "/about": "About — Study Shelf",
       "/privacy": "Privacy — Study Shelf",
       "/terms": "Terms — Study Shelf",
+      "/community": "Community PDFs — Study Shelf",
       "/login": "Sign in — Study Shelf",
       "/signup": "Create your workspace — Study Shelf",
       "/dashboard": "Your workspace — Study Shelf",
@@ -1616,9 +1724,25 @@ function App() {
 
   return (
     <StudyContext.Provider value={studyValue}>
-      <MotionEffects />
-      <Header user={user} route={location.pathname} savedCount={savedIds.length} onSignOut={handleSignOut} syncError={syncError} />
-      <main id="top"><Outlet /></main>
+      {entered ? (
+        <>
+          <MotionEffects />
+          <CustomCursor />
+          <Header user={user} route={location.pathname} savedCount={savedIds.length} onSignOut={handleSignOut} syncError={syncError} />
+      <main id="top">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={location.pathname}
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -18 }}
+            transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            className="page-transition"
+          >
+            <Outlet />
+          </motion.div>
+        </AnimatePresence>
+      </main>
       <Footer user={user} />
       <div className="firebase-status" aria-live="polite">
         <span className={`status-dot ${firebaseConfigured && user && firebaseReady && !syncError ? "status-live" : ""}`} />
@@ -1627,6 +1751,10 @@ function App() {
             : "Guest shelf · sign in to sync"
           : "Guest mode · saved on this browser"}
       </div>
+      </>
+    ) : (
+      <EntrySequence onEnter={handleEntry} />
+    )}
     </StudyContext.Provider>
   );
 }
@@ -1641,6 +1769,7 @@ const router = createBrowserRouter([{
   children: [
     { index: true, element: <HomeRoute /> },
     { path: "library", element: <LibraryRoute /> },
+    { path: "community", element: <CommunityShelfRoute /> },
     { path: "book/:id", element: <BookDetailPage /> },
     { path: "about", element: <InfoPage kind="about" /> },
     { path: "privacy", element: <InfoPage kind="privacy" /> },
