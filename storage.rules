@@ -1,41 +1,8 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /community/{userId}/{fileName} {
-      function isOwner() {
-        return request.auth != null && request.auth.uid == userId;
-      }
-
-      function isPdfObject() {
-        return fileName.matches('^[a-f0-9-]+\\.pdf$');
-      }
-
-      allow read: if isPdfObject();
-      allow create: if isOwner()
-        && isPdfObject()
-        && request.resource.size > 7
-        && request.resource.size <= 20 * 1024 * 1024
-        && request.resource.contentType == 'application/pdf';
-      allow delete: if isOwner() && isPdfObject();
-      allow update: if false;
-    }
-
-    match /users/{userId}/books/{fileName} {
-      function isOwner() {
-        return request.auth != null && request.auth.uid == userId;
-      }
-
-      function isPdfObject() {
-        return fileName.matches('^[a-f0-9-]+\\.pdf$');
-      }
-
-      allow read, delete: if isOwner() && isPdfObject();
-      allow create: if isOwner()
-        && isPdfObject()
-        && request.resource.size > 7
-        && request.resource.size <= 20 * 1024 * 1024
-        && request.resource.contentType == 'application/pdf';
-      allow update: if false;
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }

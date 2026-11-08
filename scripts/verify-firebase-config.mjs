@@ -5,7 +5,6 @@ const requiredVariables = [
   "VITE_FIREBASE_AUTH_DOMAIN",
   "VITE_FIREBASE_PROJECT_ID",
   "VITE_FIREBASE_APP_ID",
-  "VITE_FIREBASE_STORAGE_BUCKET",
 ];
 
 let localConfig = "";
@@ -24,7 +23,7 @@ const isConfiguredValue = (value) => typeof value === "string"
   && !/^(your-|replace-|<|example)/i.test(value.trim());
 const missing = requiredVariables.filter((name) => !isConfiguredValue(process.env[name] || localValues[name]));
 if (missing.length) {
-  const message = `Firebase cloud features are disabled because configuration is missing: ${missing.join(", ")}.`;
+  const message = `Firebase sign-in and cloud sync are disabled because configuration is missing: ${missing.join(", ")}.`;
   if (process.env.REQUIRE_FIREBASE_CONFIG === "true") {
     console.error(message);
     console.error("Set these as GitHub Actions repository variables/secrets or configure .env.local.");

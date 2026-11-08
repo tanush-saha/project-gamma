@@ -148,11 +148,9 @@ function Header({ user, route, savedCount, onSignOut, syncError }) {
         <nav className="topnav" aria-label="Main navigation">
           <Link to="/" aria-current={isCurrent("/") ? "page" : undefined}>Home</Link>
           <Link to="/library" aria-current={isCurrent("/library") ? "page" : undefined}>Discover</Link>
-          <Link to="/community" aria-current={isCurrent("/community") ? "page" : undefined}>Community PDFs</Link>
           {user && !user.isAnonymous && <>
             <Link to="/dashboard" aria-current={isCurrent("/dashboard") ? "page" : undefined}>Workspace</Link>
             <Link to="/dashboard/progress" aria-current={isCurrent("/dashboard/progress") ? "page" : undefined}>Study map</Link>
-            <Link to="/dashboard/shelf" aria-current={isCurrent("/dashboard/shelf") ? "page" : undefined}>My PDFs</Link>
           </>}
         </nav>
         <div className="header-account">
@@ -182,11 +180,10 @@ function Footer({ user }) {
       <p>Made for the next question.</p>
       <nav className="footer-navigation" aria-label="More pages">
         <Link to="/">Home</Link><Link to="/library">Discover books</Link>
-        <Link to="/community">Community PDFs</Link>
         <Link to="/about">About</Link><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link>
         {(!user || user.isAnonymous) && <><Link to="/login">Sign in</Link><Link to="/signup">Create account</Link></>}
         {user && !user.isAnonymous && <><Link to="/dashboard">Workspace</Link><Link to="/dashboard/progress">Study map</Link>
-          <Link to="/dashboard/library">Saved books</Link><Link to="/dashboard/shelf">My PDFs</Link></>}
+          <Link to="/dashboard/library">Saved books</Link></>}
       </nav>
       <span className="footer-small">© 2026 STUDY SHELF · READ WITH CURIOSITY</span>
     </footer>
@@ -297,10 +294,10 @@ function HomePage({ onChooseTrack, savedCount, savedIds, onToggleSaved, onSearch
           <strong>{completedCount} {completedCount === 1 ? "topic" : "topics"} complete · {completionPercent}% of map</strong></Link>
         <Link className="feature-card" to="/library"><span className="feature-index">02 / READ WITH INTENTION</span><span className="feature-mark">▤</span>
           <h3>A shelf worth returning to.</h3><p>Find official textbooks and open books from their publishers. Save the ones you want within reach.</p><strong>{savedCount} books on your shelf ↗</strong></Link>
-        <Link className="feature-card" to={user ? "/dashboard/shelf" : "/signup"}><span className="feature-index">03 / MAKE IT YOURS</span><span className="feature-mark">⌂</span>
-          <h3>Your learning, in one place.</h3><p>Your account brings your saved reading and study progress along when you switch devices.</p><strong>{user ? "Open your personal shelf ↗" : "Create a free account ↗"}</strong></Link>
+        <Link className="feature-card" to={user ? "/dashboard/library" : "/signup"}><span className="feature-index">03 / MAKE IT YOURS</span><span className="feature-mark">⌂</span>
+          <h3>Your learning, in one place.</h3><p>Your account brings your saved reading and study progress along when you switch devices.</p><strong>{user ? "Open your saved books ↗" : "Create a free account ↗"}</strong></Link>
         <Link className="feature-card" to={user ? "/dashboard/progress" : "/signup"}><span className="feature-index">04 / KEEP YOUR PLACE</span><span className="feature-mark">↗</span>
-          <h3>Pick up where you left off.</h3><p>Your private study map and, if you enable Firebase Storage, your cloud PDF shelf are there when you sign in.</p><strong>{user ? "Continue learning ↗" : "Create an account ↗"}</strong></Link>
+          <h3>Pick up where you left off.</h3><p>Your private study map and saved-book progress stay with your account when you sign in.</p><strong>{user ? "Continue learning ↗" : "Create an account ↗"}</strong></Link>
       </section>
       <section className="workspace-preview page-wrap" data-reveal>
         <div className="workspace-preview-copy">
@@ -586,297 +583,6 @@ function BookPage({ savedIds, onToggleSaved, initialSavedOnly = false, privateLi
   );
 }
 
-function CloudShelfPage({ user, services, firebaseReady, shared = false }) {
-  const [books, setBooks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState("");
-  const [uploadSummary, setUploadSummary] = useState("");
-  const [uploadFileProgress, setUploadFileProgress] = useState("");
-  const [reader, setReader] = useState(null);
-  const [editingId, setEditingId] = useState("");
-  const [draftTitle, setDraftTitle] = useState("");
-  const fileInput = useRef(null);
-  const folderInput = useRef(null);
-
-  useEffect(() => {
-    let active = true;
-    if (!firebaseReady) return undefined;
-    if (!services) {
-      setError("Firebase is not configured for this deployment. Configure Firebase Firestore and Storage to use cloud PDFs.");
-      setLoading(false);
-      return undefined;
-    }
-    if (!shared && !user) return undefined;
-    setLoading(true);
-    setError("");
-    const booksCollection = shared
-      ? services.collection(services.db, "communityBooks")
-      : services.collection(services.db, "users", user.uid, "books");
-    services.getDocs(services.query(
-      booksCollection,
-      services.orderBy("createdAt", "desc"),
-    )).then((snapshot) => {
-      if (active) setBooks(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
-    }).catch((loadError) => {
-      if (!active) return;
-      const setupHint = loadError.code === "permission-denied"
-        ? " Check that firestore.rules has been deployed to the Firebase project used by this site."
-        : "";
-      setError(`Could not load the ${shared ? "community" : "private"} cloud shelf: ${loadError.message}${setupHint}`);
-    }).finally(() => {
-      if (active) setLoading(false);
-    });
-    return () => { active = false; };
-  }, [firebaseReady, services, shared, user]);
-
-  useEffect(() => () => {
-    if (reader?.url) URL.revokeObjectURL(reader.url);
-  }, [reader?.url]);
-
-  async function handleUpload(event) {
-    const files = Array.from(event.target.files || []);
-    event.target.value = "";
-    if (!files.length) return;
-    if (!services || !firebaseReady) {
-      setError("Your Firebase account is still connecting. Try again shortly.");
-      return;
-    }
-    if (!user || user.isAnonymous) {
-      setError("Sign in to upload a PDF to the community shelf.");
-      return;
-    }
-    if (!services.storage || !services.ref || !services.uploadBytesResumable) {
-      setError("Cloud PDF uploads are not configured for this deployment. Add VITE_FIREBASE_STORAGE_BUCKET to its configuration, enable Firebase Storage, and check its billing requirements.");
-      return;
-    }
-
-    setError("");
-    setUploadSummary("");
-    const validFiles = [];
-    const failures = [];
-    for (const file of files) {
-      if (file.size > 20 * 1024 * 1024) {
-      failures.push(`${file.name}: larger than 20 MB`);
-      continue;
-      }
-      if (!/\.pdf$/i.test(file.name) || (file.type && file.type !== "application/pdf")) {
-      failures.push(`${file.name}: not a PDF`);
-      continue;
-      }
-      const signature = new TextDecoder().decode(await file.slice(0, 5).arrayBuffer());
-      if (signature !== "%PDF-") {
-      failures.push(`${file.name}: invalid PDF signature`);
-      continue;
-      }
-      validFiles.push(file);
-    }
-
-    if (!validFiles.length) {
-      setError(`No PDFs were uploaded. ${failures.join("; ")}`);
-      return;
-    }
-
-    const totalBytes = validFiles.reduce((total, file) => total + file.size, 0);
-    const totalMegabytes = (totalBytes / (1024 * 1024)).toFixed(1);
-    if (!window.confirm(
-      `Upload ${validFiles.length} PDF${validFiles.length === 1 ? "" : "s"} (${totalMegabytes} MB total) to the ${shared ? "public community shelf (visible and downloadable by anyone)" : "private Firebase shelf"}? Only upload files you own or are authorized to ${shared ? "share" : "store"}. Firebase Storage may incur charges.`,
-    )) return;
-
-    setUploading(true);
-    setProgress(0);
-    let completedBytes = 0;
-    const uploadedBooks = [];
-    try {
-      for (const [index, file] of validFiles.entries()) {
-      setUploadFileProgress(`Uploading ${index + 1} of ${validFiles.length}: ${file.name}`);
-      const id = crypto.randomUUID();
-      const storagePath = shared
-        ? `community/${user.uid}/${id}.pdf`
-        : `users/${user.uid}/books/${id}.pdf`;
-      const fileRef = services.ref(services.storage, storagePath);
-      try {
-        const task = services.uploadBytesResumable(fileRef, file, { contentType: "application/pdf" });
-        await new Promise((resolve, reject) => {
-          task.on("state_changed", (snapshot) => {
-            const percent = ((completedBytes + snapshot.bytesTransferred) / totalBytes) * 100;
-            setProgress(Math.round(percent));
-          }, reject, resolve);
-        });
-        const title = file.name.replace(/\.pdf$/i, "").trim().slice(0, 180) || "Untitled PDF";
-        const metadata = {
-          title,
-          originalName: (file.webkitRelativePath || file.name).slice(0, 255),
-          size: file.size,
-          contentType: "application/pdf",
-          storagePath,
-          ...(shared ? { ownerUid: user.uid } : {}),
-          createdAt: new Date(),
-        };
-        try {
-          const bookRef = shared
-            ? services.doc(services.db, "communityBooks", id)
-            : services.doc(services.db, "users", user.uid, "books", id);
-          await services.setDoc(bookRef, {
-            ...metadata,
-            createdAt: services.serverTimestamp(),
-          });
-        } catch (metadataError) {
-          try {
-            await services.deleteObject(fileRef);
-          } catch (cleanupError) {
-            throw new Error(`${metadataError.message}. Uploaded file cleanup failed: ${cleanupError.message}`);
-          }
-          throw metadataError;
-        }
-        uploadedBooks.push({ id, ...metadata });
-      } catch (uploadError) {
-        failures.push(`${file.name}: ${uploadError.message}`);
-      }
-      completedBytes += file.size;
-      setProgress(Math.round((completedBytes / totalBytes) * 100));
-      }
-      if (uploadedBooks.length) {
-      setBooks((current) => [...uploadedBooks, ...current]);
-      setUploadSummary(shared
-        ? `${uploadedBooks.length} PDF${uploadedBooks.length === 1 ? "" : "s"} added to the public shelf for everyone to read.`
-        : `${uploadedBooks.length} PDF${uploadedBooks.length === 1 ? "" : "s"} added to your private shelf.`);
-      }
-      if (failures.length) {
-      setError(`${failures.length} file${failures.length === 1 ? " was" : "s were"} skipped or failed: ${failures.join("; ")}`);
-      }
-    } finally {
-      setUploading(false);
-      setUploadFileProgress("");
-    }
-  }
-
-  async function openBook(book) {
-    if (!services?.storage || !services.ref || !services.getBytes) {
-      setError("Firebase Storage is not configured for this deployment. Your account and book library still work without PDF uploads.");
-      return;
-    }
-    setError("");
-    try {
-      const bytes = await services.getBytes(services.ref(services.storage, book.storagePath), 20 * 1024 * 1024);
-      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
-      setReader({ title: book.title, url });
-    } catch (readError) {
-      setError(`Could not open this PDF: ${readError.message}`);
-    }
-  }
-
-  async function removeBook(book) {
-    if (!window.confirm(`Permanently remove "${book.title}" from the ${shared ? "public community shelf" : "your Firebase account"}? This cannot be undone.`)) return;
-    if (!services?.storage || !services.ref || !services.deleteObject) {
-      setError("Firebase Storage is not configured for this deployment, so this PDF cannot be removed safely.");
-      return;
-    }
-    setError("");
-    const fileRef = services.ref(services.storage, book.storagePath);
-    try {
-      try {
-        await services.deleteObject(fileRef);
-      } catch (storageError) {
-        if (storageError.code !== "storage/object-not-found") throw storageError;
-      }
-      const bookRef = shared
-        ? services.doc(services.db, "communityBooks", book.id)
-        : services.doc(services.db, "users", user.uid, "books", book.id);
-      await services.deleteDoc(bookRef);
-      setBooks((current) => current.filter((entry) => entry.id !== book.id));
-    } catch (removeError) {
-      setError(`Could not completely remove this PDF: ${removeError.message}`);
-    }
-  }
-
-  async function renameBook(event, book) {
-    event.preventDefault();
-    const title = draftTitle.trim().slice(0, 180);
-    if (!title) {
-      setError("Enter a title for this PDF.");
-      return;
-    }
-    try {
-      const bookRef = shared
-        ? services.doc(services.db, "communityBooks", book.id)
-        : services.doc(services.db, "users", user.uid, "books", book.id);
-      await services.updateDoc(bookRef, { title });
-      setBooks((current) => current.map((entry) => entry.id === book.id ? { ...entry, title } : entry));
-      setEditingId("");
-      setError("");
-    } catch (renameError) {
-      setError(`Could not rename this PDF: ${renameError.message}`);
-    }
-  }
-
-  return (
-    <section className="page-wrap cloud-shelf-page" data-reveal>
-      <p className="eyebrow"><span className="eyebrow-dot" /> {shared ? "COMMUNITY LIBRARY · FIREBASE CLOUD" : "YOUR PRIVATE LIBRARY · FIREBASE CLOUD"}</p>
-      <div className="page-heading-row"><h1>{shared ? <>Read together.<br /><em>Share a good find.</em></> : <>Your books.<br /><em>Wherever you are.</em></>}</h1>
-        <p>{shared
-          ? "Browse PDFs uploaded by the community from any device. Every file here is public and downloadable; only share material you have permission to publish."
-          : "PDFs in this shelf are private to your account and available on your signed-in devices. Original files are kept as uploaded."}</p></div>
-      <section className="cloud-shelf-panel">
-        <p className="cloud-storage-cost-note">{shared
-          ? "Shared PDFs are publicly visible. Firebase Storage may require a billing-enabled plan; check current pricing and quotas before uploading."
-          : "Optional: private PDF storage requires Firebase's billing-enabled Blaze plan. Check current pricing and quotas before uploading; no-cost allowances are not a spending cap."}</p>
-        <div className="cloud-shelf-toolbar"><div><p className="eyebrow">{shared ? "PUBLIC FILES · COMMUNITY SHARED" : "PERSONAL FILES · PRIVATE BY DEFAULT"}</p>
-          <h2>{shared ? <>A place for shared<br /><em>reading.</em></> : <>A place for your own<br /><em>reading.</em></>}</h2></div>
-          <div><div className="cloud-upload-actions">
-            {(!shared || (user && !user.isAnonymous)) ? <>
-              <button className="hero-cta" onClick={() => fileInput.current?.click()} disabled={!firebaseReady || uploading || !services?.storage}>
-                {uploading ? `Uploading ${progress}%` : "Choose PDFs"} <span aria-hidden="true">＋</span></button>
-              <button className="cloud-folder-button" onClick={() => folderInput.current?.click()} disabled={!firebaseReady || uploading || !services?.storage}>
-                Choose folder</button>
-            </> : <Link className="hero-cta" to="/login">Sign in to upload <span aria-hidden="true">↗</span></Link>}
-            <input ref={fileInput} className="sr-only" type="file" accept=".pdf,application/pdf" multiple onChange={handleUpload} />
-            <input ref={folderInput} className="sr-only" type="file" accept=".pdf,application/pdf" multiple webkitdirectory="" onChange={handleUpload} />
-          </div><p className="cloud-shelf-limit">{services?.storage ? "Select multiple PDFs or a folder · 20 MB maximum per PDF" : "Cloud Storage not configured"}</p></div>
-        </div>
-        {uploading && <div className="cloud-upload-progress" role="progressbar" aria-valuenow={progress} aria-valuemin="0" aria-valuemax="100">
-          <span style={{ width: `${progress}%` }} /></div>}
-        {uploading && <p className="cloud-upload-status" role="status">{uploadFileProgress}</p>}
-        {uploadSummary && <p className="cloud-upload-success" role="status">{uploadSummary}</p>}
-        {error && <p className="private-error" role="alert">{error}</p>}
-        {loading ? <Skeleton className="shelf-skeleton" lines={3} />
-          : error && books.length === 0 ? null
-            : books.length === 0 ? <EmptyState title={shared ? "The community shelf is ready for its first PDF." : "Your cloud shelf is empty."}>
-            {shared ? "Sign in to share a PDF you own or are authorized to publish." : "Add a PDF you own or are authorized to store."}</EmptyState>
-            : <div className="private-book-list">{books.map((book) => (
-              <article className="private-book-row" key={book.id}><span className="private-pdf-mark">PDF</span>
-                <div className="private-book-title">{editingId === book.id
-                  ? <form className="pdf-rename-form" onSubmit={(event) => renameBook(event, book)}>
-                    <label className="sr-only" htmlFor={`pdf-title-${book.id}`}>PDF title</label>
-                    <input id={`pdf-title-${book.id}`} value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} maxLength={180} autoFocus />
-                    <button type="submit">Save</button><button type="button" onClick={() => setEditingId("")}>Cancel</button>
-                  </form>
-                  : <strong>{book.title}</strong>}
-                  <small>{(book.size / (1024 * 1024)).toFixed(2)} MB · {new Date(book.createdAt?.toDate ? book.createdAt.toDate() : book.createdAt || Date.now()).toLocaleDateString()}</small></div>
-                <button onClick={() => openBook(book)}>Read ↗</button>
-                {(!shared || book.ownerUid === user?.uid) && <>
-                  <button onClick={() => { setEditingId(book.id); setDraftTitle(book.title); }} aria-label={`Rename ${book.title}`}>Rename</button>
-                  <button onClick={() => removeBook(book)} aria-label={`Delete ${book.title}`} className="private-delete">Remove</button>
-                </>}
-              </article>
-            ))}</div>}
-        <p className="cloud-shelf-footnote">{shared
-          ? "Files are stored in Firebase Storage and are publicly readable. Only upload material you own or have explicit permission to share."
-          : "Files are stored in your Firebase Storage bucket. Never upload a book unless you have permission to store it."}</p>
-      </section>
-      {reader && <div className="reader-backdrop" role="presentation" onClick={(event) => {
-        if (event.target === event.currentTarget) { URL.revokeObjectURL(reader.url); setReader(null); }
-      }}>
-        <section className="pdf-reader" role="dialog" aria-modal="true" aria-labelledby="reader-title">
-          <header><h2 id="reader-title">{reader.title}</h2><a href={reader.url} download={`${reader.title}.pdf`}>Download PDF ↗</a>
-            <button onClick={() => { URL.revokeObjectURL(reader.url); setReader(null); }} aria-label="Close PDF reader">×</button></header>
-          <iframe title={`PDF reader: ${reader.title}`} src={reader.url} />
-        </section></div>}
-    </section>
-  );
-}
-
 function AuthDialog({ services, currentUser, onClose, connectionError, onRetry, initialMode = "signin" }) {
   const [mode, setMode] = useState(currentUser?.isAnonymous ? "upgrade" : initialMode);
   const upgrading = currentUser?.isAnonymous;
@@ -995,7 +701,7 @@ function AuthDialog({ services, currentUser, onClose, connectionError, onRetry, 
         <h2 id="auth-heading">{mode === "signup" || mode === "upgrade"
           ? upgrading ? "Save your anonymous shelf." : "Make room to grow."
           : mode === "reset" ? "A fresh start." : "Welcome back."}</h2>
-        <p className="auth-intro">A free account opens your study library, syncs saved books and progress, and gives you a private workspace. PDF uploads are optional and require Firebase Storage.</p>
+        <p className="auth-intro">A free account opens your study library, syncs saved books and progress, and gives you a private workspace.</p>
         {!services && firebaseConfigured && connectionError && <div className="auth-connection-error" role="alert">
           <p>{connectionError}</p>
           <button type="button" onClick={onRetry}>Retry Firebase connection</button>
@@ -1056,7 +762,7 @@ function AccountPage({ user, firebaseReady, onSignOut, onSyncRetry, theme, setTh
 
   async function confirmDeleteAccount(event) {
     event.preventDefault();
-    if (!window.confirm("Permanently delete your Study Shelf account, saved books, progress, and PDFs? This cannot be undone.")) return;
+    if (!window.confirm("Permanently delete your Study Shelf account, saved books, and progress? This cannot be undone.")) return;
     setDeleting(true);
     setError("");
     try {
@@ -1096,15 +802,15 @@ function AccountPage({ user, firebaseReady, onSignOut, onSyncRetry, theme, setTh
       </form>
       <div className="account-destination-grid">
         <Link to="/dashboard"><span>01 / YOUR SPACE</span><strong>Workspace ↗</strong></Link>
-        <Link to="/dashboard/shelf"><span>02 / YOUR BOOKS</span><strong>Private cloud shelf ↗</strong></Link>
+        <Link to="/dashboard/library"><span>02 / YOUR READING</span><strong>Saved books ↗</strong></Link>
         <Link to="/dashboard/progress"><span>03 / YOUR PROGRESS</span><strong>Study map ↗</strong></Link>
       </div>
       <button className="account-retry" onClick={onSyncRetry}>Retry Firebase connection ↗</button>
-      <p className="curriculum-caution">Your files and learning progress are protected by this project's Firebase security rules. To review deployment and storage setup, open <strong>SETUP.md</strong> in the project source.</p>
+      <p className="curriculum-caution">Your account and learning progress are protected by this project's Firebase security rules. To review deployment setup, open <strong>SETUP.md</strong> in the project source.</p>
       <details className="account-delete">
         <summary>Delete my account and data</summary>
         <form onSubmit={confirmDeleteAccount}>
-          <p>Deletion removes your saved reading list, topic progress, PDF files, and Firebase sign-in. Firebase may ask you to sign in again before it permits this sensitive action.</p>
+          <p>Deletion removes your saved reading list, topic progress, and Firebase sign-in. Firebase may ask you to sign in again before it permits this sensitive action.</p>
           {user?.providerData?.some((provider) => provider.providerId === "password") &&
             <label>Confirm with your password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>}
           {user?.providerData?.some((provider) => provider.providerId === "google.com") &&
@@ -1133,19 +839,17 @@ function InfoPage({ kind }) {
       sections: [
         ["Find a reliable starting point", "Discover official NCERT textbooks and books that their publishers make openly available. Each reading link takes you to the source."],
         ["Keep a thread, not a score", "Save titles and use the syllabus checklist to remember where you want to return. Your progress is personal, and it is not an exam prediction."],
-        ["Share carefully", "Community PDFs are publicly readable by anyone. Upload only files you own or have explicit permission to publish; use the private PDF shelf for files you are authorized to store privately."],
+        ["Use trusted sources", "Open textbooks and official exam resources link to their publishers or exam authorities. Check the source's terms and current syllabus."],
       ],
     },
     privacy: {
       eyebrow: "CLEAR BY DESIGN",
       title: <>Your study life<br /><em>belongs to you.</em></>,
-      description: "Study Shelf uses Firebase for account and cloud features. Review the following data practices before creating an account or uploading a file.",
+      description: "Study Shelf uses Firebase for accounts and cloud study features. Review the following data practices before creating an account.",
       sections: [
         ["Account and profile", "Firebase Authentication processes sign-in details. Firestore stores a signed-in user’s saved book identifiers, completed topic identifiers, private per-book reading percentages, preferred study path, and focus/day theme so these preferences can sync between devices. Guest bookmarks and topic progress stay in this browser’s local storage."],
-        ["Personal PDF shelf", "If you enable Firebase Storage, PDF bytes and their title, filename, size, storage path, and upload date are stored under your account. The shelf is optional; do not upload files you are not authorized to store."],
-        ["Community PDF shelf", "Community uploads are publicly readable and downloadable. Firestore stores each file's title, filename, size, storage path, upload date, and uploader's Firebase user ID. Removing your account also removes your community uploads."],
         ["Analytics and external sources", "Firebase Analytics loads only when a measurement ID is configured and the browser reports support. External book links are provided by publishers or official sources, which have their own privacy policies."],
-        ["Your choices", "You can sign out, remove saved books, remove PDFs, and delete your account from workspace settings. Account deletion requires recent authentication and removes this account’s known Firestore and Storage data before deleting its Firebase sign-in."],
+        ["Your choices", "You can sign out, remove saved books, and delete your account from workspace settings. Account deletion requires recent authentication and removes this account’s Firestore data before deleting its Firebase sign-in."],
       ],
     },
     terms: {
@@ -1153,10 +857,9 @@ function InfoPage({ kind }) {
       title: <>Learn freely.<br /><em>Respect the source.</em></>,
       description: "Use Study Shelf as a guide to learning and discovery. It is not a substitute for official curriculum advice or professional guidance.",
       sections: [
-        ["Respect copyright", "Study Shelf links to official or openly available sources and does not authorize redistribution of copyrighted books. Upload to the public community shelf only material you own or have explicit permission to share."],
+        ["Respect copyright", "Study Shelf links to official or openly available sources and does not authorize redistribution of copyrighted books."],
         ["Use your account responsibly", "Keep your sign-in secure, provide accurate account information, and do not attempt to access another person’s files or disrupt the service."],
         ["Availability and accuracy", "External sources, curricula, and Firebase features can change. Check the original publisher and current education-board materials for authoritative information."],
-        ["Cloud costs", "Optional Firebase Storage requires a billing-enabled plan. The project owner is responsible for monitoring usage and any applicable charges."],
       ],
     },
   }[kind];
@@ -1261,7 +964,6 @@ function DashboardLayout() {
     ["/dashboard", "Overview", "⌂", true],
     ["/dashboard/library", "My library", "▤"],
     ["/dashboard/progress", "Study progress", "↗"],
-    ["/dashboard/shelf", "PDF shelf", "＋"],
     ["/dashboard/settings", "Settings", "⚙"],
   ];
   return <div className="dashboard-shell">
@@ -1299,31 +1001,11 @@ function DashboardLayout() {
 }
 
 function DashboardOverviewRoute() {
-  const { user, savedIds, completedIds, completedCount, firebaseServices, firebaseReady } = useStudy();
-  const [recentPdfs, setRecentPdfs] = useState([]);
-  const [pdfsLoading, setPdfsLoading] = useState(true);
-  const [pdfError, setPdfError] = useState("");
+  const { user, savedIds, completedIds, completedCount } = useStudy();
   const totalUnits = courses.reduce((sum, course) => sum + course.units.length, 0);
   const completion = totalUnits ? Math.round((completedCount / totalUnits) * 100) : 0;
   const activeSubjects = [...new Set(courses.filter((course) => course.units.some((unit) => completedIds.includes(unit.id)))
     .map((course) => course.subject))];
-
-  useEffect(() => {
-    let active = true;
-    if (!firebaseServices || !user || !firebaseReady) return undefined;
-    firebaseServices.getDocs(firebaseServices.query(
-      firebaseServices.collection(firebaseServices.db, "users", user.uid, "books"),
-      firebaseServices.orderBy("createdAt", "desc"),
-      firebaseServices.limit(3),
-    )).then((snapshot) => {
-      if (active) setRecentPdfs(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
-    }).catch((error) => {
-      if (active) setPdfError(`Recent PDFs could not be loaded: ${error.message}`);
-    }).finally(() => {
-      if (active) setPdfsLoading(false);
-    });
-    return () => { active = false; };
-  }, [firebaseReady, firebaseServices, user]);
 
   return <>
     <DashboardPage user={user} savedCount={savedIds.length} completedIds={completedIds} completedCount={completedCount} />
@@ -1338,12 +1020,10 @@ function DashboardOverviewRoute() {
           <p>{completedCount} of {totalUnits} learning points marked complete.</p></Card>
         <Card className="insight-card"><span>SUBJECTS IN MOTION</span><strong>{activeSubjects.length.toString().padStart(2, "0")}</strong>
           <p>{activeSubjects.length ? activeSubjects.join(" · ") : "Your first subject is waiting for you."}</p></Card>
-        <Card className="insight-card insight-recent"><span>RECENT PRIVATE PDFs</span>
-          {pdfError ? <Toast variant="error">{pdfError}</Toast>
-            : pdfsLoading ? <Skeleton lines={2} />
-              : recentPdfs.length ? recentPdfs.map((book) => <Link key={book.id} to="/dashboard/shelf">
-                <strong>{book.title}</strong><small>{(book.size / (1024 * 1024)).toFixed(2)} MB · Open your private shelf ↗</small></Link>)
-                : <EmptyState title="No personal PDFs yet.">Your saved books and progress work without cloud uploads.</EmptyState>}
+        <Card className="insight-card insight-saved"><span>SAVED FOR LATER</span>
+          <strong>{savedIds.length.toString().padStart(2, "0")}</strong>
+          <p>{savedIds.length ? "Titles kept close in your personal library." : "Save useful books from Discover and find them here."}</p>
+          <Link to="/dashboard/library">Open your saved books ↗</Link>
         </Card>
       </div>
     </section>
@@ -1391,16 +1071,6 @@ function BookProgressPanel({ savedIds, records, onChange }) {
       })}</div>
     </>}
   </section>;
-}
-
-function DashboardShelfRoute() {
-  const { user, firebaseServices, firebaseReady } = useStudy();
-  return <CloudShelfPage user={user} services={firebaseServices} firebaseReady={firebaseReady} />;
-}
-
-function CommunityShelfRoute() {
-  const { user, firebaseServices, firebaseReady } = useStudy();
-  return <CloudShelfPage user={user} services={firebaseServices} firebaseReady={firebaseReady} shared />;
 }
 
 function SettingsRoute() {
@@ -1619,49 +1289,12 @@ function App() {
       throw new Error("This sign-in provider does not yet support secure account deletion in the app.");
     }
 
-    const booksRef = firebaseServices.collection(firebaseServices.db, "users", user.uid, "books");
-    const booksSnapshot = await firebaseServices.getDocs(booksRef);
-    for (const bookSnapshot of booksSnapshot.docs) {
-      const book = bookSnapshot.data();
-      if (book.storagePath) {
-        if (!firebaseServices.storage || !firebaseServices.ref || !firebaseServices.deleteObject) {
-          throw new Error("This account has private PDFs, but Firebase Storage is not configured in this deployment. Configure the Storage bucket, then retry deletion so those files can be removed safely.");
-        }
-        try {
-          await firebaseServices.deleteObject(firebaseServices.ref(firebaseServices.storage, book.storagePath));
-        } catch (storageError) {
-          if (storageError.code !== "storage/object-not-found") throw storageError;
-        }
-      }
-      await firebaseServices.deleteDoc(bookSnapshot.ref);
+    for (const collectionName of ["books", "savedBooks", "bookProgress"]) {
+      const collectionRef = firebaseServices.collection(firebaseServices.db, "users", user.uid, collectionName);
+      const snapshot = await firebaseServices.getDocs(collectionRef);
+      for (const document of snapshot.docs) await firebaseServices.deleteDoc(document.ref);
     }
 
-    const communityBooksQuery = firebaseServices.query(
-      firebaseServices.collection(firebaseServices.db, "communityBooks"),
-      firebaseServices.where("ownerUid", "==", user.uid),
-    );
-    const communityBooksSnapshot = await firebaseServices.getDocs(communityBooksQuery);
-    for (const bookSnapshot of communityBooksSnapshot.docs) {
-      const book = bookSnapshot.data();
-      if (book.storagePath) {
-        if (!firebaseServices.storage || !firebaseServices.ref || !firebaseServices.deleteObject) {
-          throw new Error("This account has public PDFs, but Firebase Storage is not configured in this deployment. Configure the Storage bucket, then retry deletion.");
-        }
-        try {
-          await firebaseServices.deleteObject(firebaseServices.ref(firebaseServices.storage, book.storagePath));
-        } catch (storageError) {
-          if (storageError.code !== "storage/object-not-found") throw storageError;
-        }
-      }
-      await firebaseServices.deleteDoc(bookSnapshot.ref);
-    }
-
-    const legacySavedRef = firebaseServices.collection(firebaseServices.db, "users", user.uid, "savedBooks");
-    const legacySavedSnapshot = await firebaseServices.getDocs(legacySavedRef);
-    for (const savedBook of legacySavedSnapshot.docs) await firebaseServices.deleteDoc(savedBook.ref);
-    const bookProgressRef = firebaseServices.collection(firebaseServices.db, "users", user.uid, "bookProgress");
-    const bookProgressSnapshot = await firebaseServices.getDocs(bookProgressRef);
-    for (const record of bookProgressSnapshot.docs) await firebaseServices.deleteDoc(record.ref);
     await firebaseServices.deleteDoc(firebaseServices.doc(firebaseServices.db, "users", user.uid));
     await firebaseServices.deleteUser(user);
     setSavedIds([]);
@@ -1685,13 +1318,11 @@ function App() {
       "/about": "About — Study Shelf",
       "/privacy": "Privacy — Study Shelf",
       "/terms": "Terms — Study Shelf",
-      "/community": "Community PDFs — Study Shelf",
       "/login": "Sign in — Study Shelf",
       "/signup": "Create your workspace — Study Shelf",
       "/dashboard": "Your workspace — Study Shelf",
       "/dashboard/library": "Your library — Study Shelf",
       "/dashboard/progress": "Study progress — Study Shelf",
-      "/dashboard/shelf": "Your PDF shelf — Study Shelf",
       "/dashboard/settings": "Workspace settings — Study Shelf",
     };
     document.title = titles[location.pathname] || (location.pathname.startsWith("/book/") ? "Book details — Study Shelf" : "Page not found — Study Shelf");
@@ -1715,7 +1346,7 @@ function App() {
       "/topics": "/dashboard/progress",
       "/library": "/library",
       "/saved": "/dashboard/library",
-      "/shelf": "/dashboard/shelf",
+      "/shelf": "/dashboard/library",
       "/account": "/dashboard/settings",
     };
     const destination = redirects[legacyPath];
@@ -1769,7 +1400,7 @@ const router = createBrowserRouter([{
   children: [
     { index: true, element: <HomeRoute /> },
     { path: "library", element: <LibraryRoute /> },
-    { path: "community", element: <CommunityShelfRoute /> },
+    { path: "community", element: <Navigate to="/library" replace /> },
     { path: "book/:id", element: <BookDetailPage /> },
     { path: "about", element: <InfoPage kind="about" /> },
     { path: "privacy", element: <InfoPage kind="privacy" /> },
@@ -1785,7 +1416,7 @@ const router = createBrowserRouter([{
           { index: true, element: <DashboardOverviewRoute /> },
           { path: "library", element: <DashboardLibraryRoute /> },
           { path: "progress", element: <DashboardProgressRoute /> },
-          { path: "shelf", element: <DashboardShelfRoute /> },
+          { path: "shelf", element: <Navigate to="/dashboard/library" replace /> },
           { path: "settings", element: <SettingsRoute /> },
         ],
       }],
