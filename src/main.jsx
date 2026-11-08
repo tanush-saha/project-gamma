@@ -8,6 +8,10 @@ import { openBooks } from "./books.js";
 import { courses, publicTextbooks, textbookCaution } from "./curriculum.js";
 import { firebaseConfigured, loadFirebase, missingFirebaseConfig } from "./firebase.js";
 import { Badge, Button, Card, EmptyState, ProgressBar, Skeleton, Tabs, ThemeToggle, Toast } from "./components/ui.jsx";
+import { NotesLibrary } from "./pages/NotesLibrary.jsx";
+import { PYQExplorer } from "./pages/PYQExplorer.jsx";
+import { CoachingMaterial } from "./pages/CoachingMaterial.jsx";
+import { TestSeries } from "./pages/TestSeries.jsx";
 import "./styles.css";
 import "./immersive.css";
 
@@ -148,6 +152,7 @@ function Header({ user, route, savedCount, onSignOut, syncError }) {
         <nav className="topnav" aria-label="Main navigation">
           <Link to="/" aria-current={isCurrent("/") ? "page" : undefined}>Home</Link>
           <Link to="/library" aria-current={isCurrent("/library") ? "page" : undefined}>Discover</Link>
+          <Link to="/pyq" aria-current={isCurrent("/pyq") ? "page" : undefined}>Past papers</Link>
           {user && !user.isAnonymous && <>
             <Link to="/dashboard" aria-current={isCurrent("/dashboard") ? "page" : undefined}>Workspace</Link>
             <Link to="/dashboard/progress" aria-current={isCurrent("/dashboard/progress") ? "page" : undefined}>Study map</Link>
@@ -1315,6 +1320,7 @@ function App() {
     const titles = {
       "/": "Study Shelf — Find your next great book",
       "/library": "Discover books — Study Shelf",
+      "/pyq": "Past papers — Study Shelf",
       "/about": "About — Study Shelf",
       "/privacy": "Privacy — Study Shelf",
       "/terms": "Terms — Study Shelf",
@@ -1400,6 +1406,7 @@ const router = createBrowserRouter([{
   children: [
     { index: true, element: <HomeRoute /> },
     { path: "library", element: <LibraryRoute /> },
+    { path: "pyq", element: <PYQExplorer /> },
     { path: "community", element: <Navigate to="/library" replace /> },
     { path: "book/:id", element: <BookDetailPage /> },
     { path: "about", element: <InfoPage kind="about" /> },
