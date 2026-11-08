@@ -1,5 +1,14 @@
 {
   "projects": {
     "default": "project-gamma-d8ec2"
+  },
+  "targets": {
+    "project-gamma-d8ec2": {
+      "hosting": {
+        "studyshelf-tanush": [
+          "studyshelf-tanush"
+        ]
+      }
+    }
   }
 }

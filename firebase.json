@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "target": "studyshelf-tanush",
     "public": "dist",
     "ignore": [
       "firebase.json",
@@ -14,7 +15,10 @@
     ]
   },
   "firestore": {
-    "rules": "firestore.rules"
+    "database": "(default)",
+    "location": "asia-south2",
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
   },
   "storage": {
     "rules": "storage.rules"
