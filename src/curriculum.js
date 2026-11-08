@@ -32,7 +32,7 @@ export const courses = [
     "Laws of motion::Newton's laws of motion; Free-body diagrams; Friction and circular motion; Momentum, impulse, and collisions",
     "Work, energy and power::Work by constant and variable forces; Kinetic and potential energy; Conservation of mechanical energy; Power and collisions",
     "System of particles and rotation::Centre of mass; Torque and angular momentum; Rotational kinematics; Moment of inertia and rolling",
-    "Gravitation::Newton's law of gravitation; Gravitational field and potential; Satellites and orbital motion; Escape speed and Kepler's laws",
+    "Gravitation::Newton's law of Gravitation; Gravitational field and potential; Satellites and orbital motion; Escape speed and Kepler's laws",
     "Properties of bulk matter::Elasticity and stress; Fluid pressure and buoyancy; Viscosity and surface tension; Heat, expansion, and calorimetry",
     "Thermodynamics::Thermal equilibrium and zeroth law; First law and internal energy; Heat engines and the second law; Reversible and irreversible processes",
     "Kinetic theory::Molecular model of gases; Pressure, temperature, and molecular speeds; Degrees of freedom and equipartition; Specific heat of gases",
