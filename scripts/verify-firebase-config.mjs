@@ -24,7 +24,11 @@ const isConfiguredValue = (value) => typeof value === "string"
   && !/^(your-|replace-|<|example)/i.test(value.trim());
 const missing = requiredVariables.filter((name) => !isConfiguredValue(process.env[name] || localValues[name]));
 if (missing.length) {
-  console.error(`Missing Firebase web app configuration: ${missing.join(", ")}`);
-  console.error("Set these as GitHub Actions repository variables/secrets or configure .env.local.");
-  process.exit(1);
+  const message = `Firebase cloud features are disabled because configuration is missing: ${missing.join(", ")}.`;
+  if (process.env.REQUIRE_FIREBASE_CONFIG === "true") {
+    console.error(message);
+    console.error("Set these as GitHub Actions repository variables/secrets or configure .env.local.");
+    process.exit(1);
+  }
+  console.warn(`${message} Building the public site in guest mode.`);
 }

@@ -1,12 +1,16 @@
 # Study Shelf setup
 
-GitHub Pages or Firebase Hosting serves the React app. Firebase supplies
-sign-in, Firestore, and shared file storage. This guide is for the project
-owner. Never share passwords, private keys, Firebase Admin
-credentials, access tokens, or service-account JSON.
+GitHub Pages or Firebase Hosting serves the React app. Firebase optionally
+supplies sign-in, Firestore, and shared file storage; the public catalog works
+without Firebase configuration. This guide is for the project owner. Never
+share passwords, private keys, Firebase Admin credentials, access tokens, or
+service-account JSON.
 
-## 1. Set up Firebase
+## 1. Set up Firebase (optional)
 
+Skip this section and the Firebase configuration steps if you only need the
+public catalog. Firebase is required for accounts, cloud sync, and shared PDF
+uploads.
 1. In the [Firebase Console](https://console.firebase.google.com/), create or
    select your project and register a **Web app** under **Project settings →
    General → Your apps**.
@@ -88,8 +92,9 @@ when changes are pushed to `main`. It supports both a repository site
 
 1. Push this repository to GitHub and make sure its default deployment branch
    is `main`.
-2. Open **Repository → Settings → Secrets and variables → Actions** and add
-   the Firebase Web app configuration as repository variables or secrets. Use
+2. To enable Firebase accounts, cloud sync, and shared uploads, open
+   **Repository → Settings → Secrets and variables → Actions** and add the
+   Firebase Web app configuration as repository variables or secrets. Use
    these exact names:
    - `VITE_FIREBASE_API_KEY`
    - `VITE_FIREBASE_AUTH_DOMAIN`
@@ -101,12 +106,15 @@ when changes are pushed to `main`. It supports both a repository site
 3. Set each value from your Firebase Web app configuration. These values are
    public client configuration, not private credentials; the build makes them
    visible in the website. The deployment workflow accepts either Actions
-   variables or Actions secrets. Do not add a service-account key.
-4. Open **Repository → Settings → Pages**, choose **GitHub Actions** as the
-   build and deployment source, and save.
-5. Open **Actions → Deploy Study Shelf to GitHub Pages** and monitor the
-   workflow. The build intentionally fails with a clear message if a required
-   Firebase variable is missing.
+   variables or Actions secrets. Do not add a service-account key. Firebase
+   configuration is optional for publishing: without it, the public catalog
+   works in guest mode, while account sync and cloud uploads remain disabled.
+4. Open **Repository → Settings → Pages**, set **Build and deployment →
+   Source** to **GitHub Actions** (not **Deploy from a branch**), and save.
+   The branch source serves the unbuilt Vite source and cannot run this app.
+5. Open **Actions → Deploy Study Shelf to GitHub Pages**, choose **Run
+   workflow** to publish the latest commit, and monitor the run. The build
+   checks that the generated bundle and repository base path are present.
 6. When deployment finishes, open the Pages URL shown in the workflow, then
    verify that the same hostname (without scheme or path) is in Firebase
    Authentication's authorized domains.
@@ -131,9 +139,9 @@ and `dist/.nojekyll` are build artifacts; do not hand-edit them.
   Google sign-in and set its support email.
 - **“The email or password is not correct”**: Create an account first or use
   **Forgot password?**. Passwords are not transferred from another site.
-- **Firebase connection/configuration error**: Check the required Actions
-  values, your network, and the Actions build log. A local `.env.local` does
-  not configure the GitHub Pages deployment.
+- **Guest mode is shown**: Add the Firebase Web app values to Actions
+  variables/secrets and rerun the workflow. A local `.env.local` does not
+  configure the GitHub Pages deployment.
 - **Firestore `permission-denied` after sign-in**: Select the correct Firebase
   project, deploy `firestore.rules`, then retry. Authentication and Firestore
   rules are configured separately.

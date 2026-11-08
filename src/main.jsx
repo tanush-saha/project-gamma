@@ -1794,6 +1794,7 @@ const router = createBrowserRouter([{
   ],
 }], { basename: import.meta.env.BASE_URL });
 root.render(<React.StrictMode><RouterProvider router={router} /></React.StrictMode>);
+document.getElementById("deployment-fallback")?.remove();
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => root.unmount());

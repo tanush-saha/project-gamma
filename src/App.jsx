@@ -7,14 +7,12 @@ export function StudyShelfApp() {
   const { user, loading } = useAuth();
 
   useEffect(() => {
-    // Initialize app after auth state is ready
   }, [user, loading]);
 
   if (loading) {
     return <Navigate to="/login" replace />;
   }
 
-  // If user is not authenticated, show public routes via Outlet
   if (!user) {
     return <Outlet />;
   }
