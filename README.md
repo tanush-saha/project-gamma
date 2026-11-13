@@ -8,6 +8,8 @@ and study progress.
 ## Features
 
 - Public home, source library, book details, and product/legal pages.
+- A daily cross-stream study question and an on-page focus/break timer with
+  adjustable session lengths.
 - A searchable resource catalog with JEE/NEET filters, saved titles, and
   reference-book edition/preview searches through Google Books.
 - Official CBSE sample papers and exam archives, plus links to open-textbook

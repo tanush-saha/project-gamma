@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { createBrowserRouter, Link, Navigate, Outlet, RouterProvider, useLocation, useNavigate, useParams } from "react-router-dom";
 import { CustomCursor } from "./components/cursor/CustomCursor";
 import { EntrySequence } from "./components/EntrySequence.jsx";
+import { FocusStudio } from "./components/FocusStudio.jsx";
 import { openBooks } from "./books.js";
 import { courses, publicTextbooks, textbookCaution } from "./curriculum.js";
 import { firebaseConfigured, loadFirebase, missingFirebaseConfig } from "./firebase.js";
@@ -276,6 +277,7 @@ function HomePage({ onChooseTrack, savedCount, savedIds, onToggleSaved, onSearch
           ))}
         </div>
       </section>
+      <FocusStudio onSearchSources={onSearchSources} />
       <section className="home-source-preview page-wrap" data-reveal>
         <div className="dashboard-section-heading"><div><p className="eyebrow">A FEW TRUSTED PLACES TO BEGIN</p>
           <h2>Find the source.<br /><em>Follow the idea.</em></h2></div>
