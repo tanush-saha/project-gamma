@@ -24,41 +24,32 @@ export function CustomCursor({ enabled = true }) {
     };
 
     const move = (e) => {
-      const t = `translate3d(${e.clientX}px, ${e.clientY}px, 0) translate(-50%, -50%)`;
-      [wrapRef, dotRef, ringRef, labelRef].forEach((r) => { if (r.current) r.current.style.transform = t; });
-    };
-
-    const mark = (e) => {
-      if (!enabled || !finePointer.matches || reducedMotion.matches) return;
-      const target = e.target.closest("a, button, [role='button'], [data-cursor], input, select, textarea");
+      if (wrapRef.current) {
+        wrapRef.current.style.setProperty("--cursor-x", `${e.clientX}px`);
+        wrapRef.current.style.setProperty("--cursor-y", `${e.clientY}px`);
+      }
+      const hit = document.elementFromPoint(e.clientX, e.clientY);
+      const target = hit?.closest?.("a, button, [role='button'], [data-cursor], input, select, textarea");
       const isInteractive = Boolean(target);
       setHovered(isInteractive);
-      if (isInteractive) {
-        const kind = target.dataset.cursor ||
-          (target.tagName === "A" ? "view" :
-           target.tagName === "BUTTON" ? "open" :
-           target.dataset.drag ? "drag" :
-           target.dataset.play ? "play" : "view");
-        setLabel(kind);
-      } else {
+      if (!isInteractive) {
         setLabel("");
+        return;
       }
+      const kind = target.dataset.cursor ||
+        (target.tagName === "A" ? "view" :
+         target.tagName === "BUTTON" ? "open" : "view");
+      setLabel(kind);
     };
-
-    const clearInteractive = () => { setHovered(false); setLabel(""); };
 
     updateAvailability();
     finePointer.addEventListener("change", updateAvailability);
     reducedMotion.addEventListener("change", updateAvailability);
     window.addEventListener("pointermove", move, { passive: true });
-    document.addEventListener("pointerover", mark, true);
-    document.addEventListener("pointerout", clearInteractive, true);
     return () => {
       finePointer.removeEventListener("change", updateAvailability);
       reducedMotion.removeEventListener("change", updateAvailability);
       window.removeEventListener("pointermove", move);
-      document.removeEventListener("pointerover", mark, true);
-      document.removeEventListener("pointerout", clearInteractive, true);
       docEl.classList.remove("cursor-hidden");
       setActive(false);
     };

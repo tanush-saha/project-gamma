@@ -13,11 +13,17 @@ export function EntrySequence({ onEnter }) {
     if (alreadyEntered || reducedMotion) {
       setStep(3);
       onEnter?.();
-      return;
+      return undefined;
     }
     const t = setTimeout(() => setStep(1), 100);
     return () => clearTimeout(t);
   }, [onEnter]);
+
+  useEffect(() => {
+    if (step !== 1) return undefined;
+    const t = setTimeout(() => setStep(2), 1600);
+    return () => clearTimeout(t);
+  }, [step]);
 
   const handleSkip = () => {
     sessionStorage.setItem(STORAGE_KEY, "1");
@@ -89,13 +95,6 @@ export function EntrySequence({ onEnter }) {
               </motion.div>
             )}
           </AnimatePresence>
-          {/* Auto-advance through steps */}
-          {step === 1 && (
-            <motion.div
-              animate={{ opacity: [0, 1] }}
-              transition={{ duration: 1.6, onComplete: () => setStep(2) }}
-            />
-          )}
         </div>
       )}
     </AnimatePresence>
