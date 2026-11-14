@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import "./focus-studio.css";
+import { soundEngine } from "../utils/audio.js";
 
 const studyPrompts = [
   { track: "PCM", question: "What does the slope of a position–time graph tell you about motion?" },
@@ -10,6 +11,8 @@ const studyPrompts = [
   { track: "PCB", question: "How does the structure of DNA help it copy itself accurately?" },
   { track: "Commerce", question: "Why does a business distinguish fixed costs from variable costs?" },
   { track: "Humanities", question: "How can the same event be remembered in different ways?" },
+  { track: "PCM", question: "What is the physical meaning of the cross product of two vectors?" },
+  { track: "PCB", question: "How does the nephron maintain electrolyte balance in the human body?" },
 ];
 
 const durations = {
@@ -38,6 +41,7 @@ export function FocusStudio({ onSearchSources }) {
   const [running, setRunning] = useState(false);
   const [completedSessions, setCompletedSessions] = useState(0);
   const [timerMessage, setTimerMessage] = useState("Choose a length, then begin when you’re ready.");
+  const [ambience, setAmbience] = useState("none");
 
   useEffect(() => {
     if (!running || deadline === null) return undefined;
@@ -48,6 +52,7 @@ export function FocusStudio({ onSearchSources }) {
       if (secondsLeft === 0) {
         setRunning(false);
         setDeadline(null);
+        soundEngine.playIntroChord();
         if (mode === "focus") setCompletedSessions((count) => count + 1);
         setTimerMessage(mode === "focus" ? "Focus session complete. Take a well-earned pause." : "Break complete. Ready when you are.");
       }
@@ -58,7 +63,14 @@ export function FocusStudio({ onSearchSources }) {
     return () => window.clearInterval(intervalId);
   }, [deadline, mode, running]);
 
+  function handleAmbienceChange(type) {
+    soundEngine.playClick();
+    setAmbience(type);
+    soundEngine.setAmbience(type);
+  }
+
   function chooseMode(nextMode) {
+    soundEngine.playClick();
     const nextMinutes = durations[nextMode][nextMode === "focus" ? 1 : 0];
     setMode(nextMode);
     setMinutes(nextMinutes);
@@ -69,6 +81,7 @@ export function FocusStudio({ onSearchSources }) {
   }
 
   function chooseDuration(nextMinutes) {
+    soundEngine.playClick();
     setMinutes(nextMinutes);
     setRemaining(nextMinutes * 60);
     setDeadline(null);
@@ -77,6 +90,7 @@ export function FocusStudio({ onSearchSources }) {
   }
 
   function toggleTimer() {
+    soundEngine.playClick();
     if (running) {
       const secondsLeft = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
       setRemaining(secondsLeft);
@@ -94,6 +108,7 @@ export function FocusStudio({ onSearchSources }) {
   }
 
   function resetTimer() {
+    soundEngine.playClick();
     setRunning(false);
     setDeadline(null);
     setRemaining(minutes * 60);
@@ -124,10 +139,24 @@ export function FocusStudio({ onSearchSources }) {
           <h3 key={promptIndex} className="spark-question">{prompt.question}</h3>
           <p className="spark-card-note">Good questions are a lovely place to begin.</p>
           <div className="spark-card-actions">
-            <button type="button" className="spark-next-button" onClick={() => setPromptIndex((index) => (index + 1) % studyPrompts.length)}>
+            <button
+              type="button"
+              className="spark-next-button"
+              onClick={() => {
+                soundEngine.playClick();
+                setPromptIndex((index) => (index + 1) % studyPrompts.length);
+              }}
+            >
               Another question <span aria-hidden="true">↻</span>
             </button>
-            <button type="button" className="spark-explore-button" onClick={() => onSearchSources(prompt.question)}>
+            <button
+              type="button"
+              className="spark-explore-button"
+              onClick={() => {
+                soundEngine.playClick();
+                onSearchSources(prompt.question);
+              }}
+            >
               Explore this idea <span aria-hidden="true">↗</span>
             </button>
           </div>
@@ -168,6 +197,41 @@ export function FocusStudio({ onSearchSources }) {
             </button>
             <button type="button" className="timer-reset-button" onClick={resetTimer} aria-label="Reset timer">↺</button>
           </div>
+
+          {/* Ambient Soundscapes Switcher */}
+          <div className="timer-ambience-panel" style={{ marginTop: "1rem", borderTop: "1px solid var(--border)", paddingTop: "0.85rem" }}>
+            <span style={{ fontSize: "0.7rem", fontFamily: "var(--mono)", color: "var(--muted)", display: "block", marginBottom: "6px" }}>
+              ♪ FOCUS SOUNDSCAPES (WEB AUDIO)
+            </span>
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              {[
+                { id: "none", label: "Mute" },
+                { id: "rain", label: "Rain 🌧️" },
+                { id: "space", label: "Cosmos 🌌" },
+                { id: "binaural", label: "432Hz 🧘" },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleAmbienceChange(item.id)}
+                  style={{
+                    padding: "3px 8px",
+                    borderRadius: "999px",
+                    border: "1px solid",
+                    borderColor: ambience === item.id ? "var(--accent)" : "var(--border)",
+                    background: ambience === item.id ? "rgba(215,173,120,0.15)" : "transparent",
+                    color: ambience === item.id ? "var(--accent)" : "inherit",
+                    fontSize: "0.72rem",
+                    cursor: "pointer",
+                    fontFamily: "var(--mono)",
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="timer-footer">
             <span aria-live="polite">{timerMessage}</span>
             <span>{completedSessions} {completedSessions === 1 ? "session" : "sessions"} finished</span>

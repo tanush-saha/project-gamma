@@ -1,3 +1,5 @@
+import { expandedArchiveResources } from "./data/archiveResources.js";
+
 const primaryOpenBooks = [
   {
     id: "chemistry-openstax",
@@ -932,7 +934,7 @@ function presentBook(book, index) {
   };
 }
 
-export const openBooks = [...primaryOpenBooks, ...curatedResources, ...examReferenceBooks, ...archiveAdditions]
+export const openBooks = [...expandedArchiveResources, ...primaryOpenBooks, ...curatedResources, ...examReferenceBooks, ...archiveAdditions]
   .map(presentBook);
 
 export function matchesExam(book, examId) {

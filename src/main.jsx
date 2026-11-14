@@ -13,8 +13,14 @@ import { NotesLibrary } from "./pages/NotesLibrary.jsx";
 import { PYQExplorer } from "./pages/PYQExplorer.jsx";
 import { CoachingMaterial } from "./pages/CoachingMaterial.jsx";
 import { TestSeries } from "./pages/TestSeries.jsx";
+import { TrigoStudio } from "./pages/TrigoStudio.jsx";
+import { CommandPalette } from "./components/CommandPalette.jsx";
+import { QuickReaderModal } from "./components/QuickReaderModal.jsx";
+import { soundEngine } from "./utils/audio.js";
 import "./styles.css";
 import "./immersive.css";
+import "./components/entry-sequence.css";
+import "./components/studio-hud.css";
 
 const tracks = [
   { id: "PCM", name: "Physics · Chemistry · Maths", short: "PCM", mark: "∑" },
@@ -143,7 +149,7 @@ function MotionEffects() {
   return <div className="scroll-progress" aria-hidden="true" />;
 }
 
-function Header({ user, route, savedCount, onSignOut, syncError }) {
+function Header({ user, route, savedCount, onSignOut, syncError, onOpenCommandPalette, onToggleAudio, isAudioMuted }) {
   const displayName = user?.displayName || user?.email?.split("@")[0];
   const isCurrent = (path) => route === path || (path !== "/" && route.startsWith(`${path}/`));
   return (
@@ -151,27 +157,56 @@ function Header({ user, route, savedCount, onSignOut, syncError }) {
       <header className="topbar">
         <Brand />
         <nav className="topnav" aria-label="Main navigation">
-          <Link to="/" aria-current={isCurrent("/") ? "page" : undefined}>Home</Link>
-          <Link to="/library" aria-current={isCurrent("/library") ? "page" : undefined}>Discover</Link>
-          <Link to="/pyq" aria-current={isCurrent("/pyq") ? "page" : undefined}>Past papers</Link>
+          <Link to="/" aria-current={isCurrent("/") ? "page" : undefined} onClick={() => soundEngine.playClick()}>Home</Link>
+          <Link to="/library" aria-current={isCurrent("/library") ? "page" : undefined} onClick={() => soundEngine.playClick()}>Discover</Link>
+          <Link to="/notes" aria-current={isCurrent("/notes") ? "page" : undefined} onClick={() => soundEngine.playClick()}>Notes</Link>
+          <Link to="/coaching" aria-current={isCurrent("/coaching") ? "page" : undefined} onClick={() => soundEngine.playClick()}>Coaching</Link>
+          <Link to="/pyq" aria-current={isCurrent("/pyq") ? "page" : undefined} onClick={() => soundEngine.playClick()}>Past papers</Link>
+          <Link to="/tests" aria-current={isCurrent("/tests") ? "page" : undefined} onClick={() => soundEngine.playClick()}>Test Series</Link>
+          <Link to="/trigo" aria-current={isCurrent("/trigo") ? "page" : undefined} className="nav-trigo-pill" onClick={() => soundEngine.playClick()}>
+            <span>Trigo Lab</span>
+            <span className="nav-pulse-badge">NEW</span>
+          </Link>
           {user && !user.isAnonymous && <>
-            <Link to="/dashboard" aria-current={isCurrent("/dashboard") ? "page" : undefined}>Workspace</Link>
-            <Link to="/dashboard/progress" aria-current={isCurrent("/dashboard/progress") ? "page" : undefined}>Study map</Link>
+            <Link to="/dashboard" aria-current={isCurrent("/dashboard") ? "page" : undefined} onClick={() => soundEngine.playClick()}>Workspace</Link>
+            <Link to="/dashboard/progress" aria-current={isCurrent("/dashboard/progress") ? "page" : undefined} onClick={() => soundEngine.playClick()}>Study map</Link>
           </>}
         </nav>
-        <div className="header-account">
-          <Link className="saved-link" to={user && !user.isAnonymous ? "/dashboard/library" : "/login"}>
-            <span className="saved-star" aria-hidden="true">✳</span>
-            <span className="saved-label">Saved</span> <span className="saved-count">{savedCount}</span>
-          </Link>
-          {user && !user.isAnonymous ? (
-            <div className="user-menu">
-              <Link className="user-name" to="/dashboard/settings" title={user.email || ""}>{displayName || "My account"}</Link>
-              <button onClick={onSignOut} className="sign-in-button">Sign out</button>
-            </div>
-          ) : (
-            <Link to="/login" className="sign-in-button">{user?.isAnonymous ? "Secure shelf" : "Sign in"}</Link>
-          )}
+        <div className="header-actions-bar">
+          <button
+            type="button"
+            className="header-cmd-btn"
+            onClick={onOpenCommandPalette}
+            title="Search books, notes, formulas (Ctrl + K)"
+            aria-label="Open command search"
+          >
+            <span aria-hidden="true">⌕</span>
+            <span className="cmd-label">Search</span>
+            <kbd className="cmd-kbd">Ctrl K</kbd>
+          </button>
+          <button
+            type="button"
+            className="header-audio-btn"
+            onClick={onToggleAudio}
+            title={isAudioMuted ? "Unmute audio" : "Mute audio"}
+            aria-label={isAudioMuted ? "Unmute audio" : "Mute audio"}
+          >
+            {isAudioMuted ? "♪ Muted" : "♪ Audio"}
+          </button>
+          <div className="header-account">
+            <Link className="saved-link" to={user && !user.isAnonymous ? "/dashboard/library" : "/login"}>
+              <span className="saved-star" aria-hidden="true">✳</span>
+              <span className="saved-label">Saved</span> <span className="saved-count">{savedCount}</span>
+            </Link>
+            {user && !user.isAnonymous ? (
+              <div className="user-menu">
+                <Link className="user-name" to="/dashboard/settings" title={user.email || ""}>{displayName || "My account"}</Link>
+                <button onClick={onSignOut} className="sign-in-button">Sign out</button>
+              </div>
+            ) : (
+              <Link to="/login" className="sign-in-button">{user?.isAnonymous ? "Secure shelf" : "Sign in"}</Link>
+            )}
+          </div>
         </div>
       </header>
       {syncError && <Toast variant="error">{syncError}</Toast>}
@@ -179,19 +214,47 @@ function Header({ user, route, savedCount, onSignOut, syncError }) {
   );
 }
 
-function Footer({ user }) {
+function Footer({ user, onReplayIntro }) {
   return (
     <footer className="footer">
       <Brand />
-      <p>Made for the next question.</p>
+      <p>Made for the next question · The orbital cosmos of books, notes, and curiosity.</p>
       <nav className="footer-navigation" aria-label="More pages">
-        <Link to="/">Home</Link><Link to="/library">Discover books</Link>
-        <Link to="/about">About</Link><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link>
+        <Link to="/">Home</Link>
+        <Link to="/library">Discover books</Link>
+        <Link to="/notes">Notes &amp; Formulas</Link>
+        <Link to="/coaching">Coaching Modules</Link>
+        <Link to="/pyq">Past papers (PYQs)</Link>
+        <Link to="/tests">Mock Test Series</Link>
+        <Link to="/trigo">Trigo &amp; Math Lab</Link>
+        <Link to="/about">About</Link>
+        <Link to="/privacy">Privacy</Link>
+        <Link to="/terms">Terms</Link>
         {(!user || user.isAnonymous) && <><Link to="/login">Sign in</Link><Link to="/signup">Create account</Link></>}
         {user && !user.isAnonymous && <><Link to="/dashboard">Workspace</Link><Link to="/dashboard/progress">Study map</Link>
           <Link to="/dashboard/library">Saved books</Link></>}
       </nav>
-      <span className="footer-small">© 2026 STUDY SHELF · READ WITH CURIOSITY</span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", flexWrap: "wrap", gap: "10px", marginTop: "1.5rem" }}>
+        <span className="footer-small">© 2026 STUDY SHELF · READ WITH CURIOSITY</span>
+        {onReplayIntro && (
+          <button
+            type="button"
+            onClick={onReplayIntro}
+            style={{
+              background: "none",
+              border: "1px solid var(--border)",
+              color: "var(--muted)",
+              borderRadius: "999px",
+              padding: "4px 14px",
+              fontSize: "0.72rem",
+              fontFamily: "var(--mono)",
+              cursor: "pointer",
+            }}
+          >
+            Replay Intro Sequence ↻
+          </button>
+        )}
+      </div>
     </footer>
   );
 }
@@ -212,7 +275,7 @@ class VisualErrorBoundary extends React.Component {
   }
 }
 
-function HomePage({ onChooseTrack, savedCount, savedIds, onToggleSaved, onSearchSources, completedCount, user }) {
+function HomePage({ onChooseTrack, savedCount, savedIds, onToggleSaved, onSearchSources, completedCount, user, onQuickRead }) {
   const [sourceSearch, setSourceSearch] = useState("");
   const completionPercent = completedCount > 0
     ? Math.max(1, Math.round((completedCount / courses.reduce((sum, course) => sum + course.units.length, 0)) * 100))
@@ -292,7 +355,7 @@ function HomePage({ onChooseTrack, savedCount, savedIds, onToggleSaved, onSearch
           </form>
         </div>
         <div className="book-grid">{openBooks.slice(0, 3).map((book, index) => <BookCard key={book.id} book={book}
-          saved={savedIds.includes(book.id)} onToggle={onToggleSaved} style={{ "--card-index": index }} />)}</div>
+          saved={savedIds.includes(book.id)} onToggle={onToggleSaved} onQuickRead={onQuickRead} style={{ "--card-index": index }} />)}</div>
         <Link className="hero-secondary-link" to="/library">Explore all official and open sources <span aria-hidden="true">↗</span></Link>
       </section>
       <section className="home-feature-strip" id="how-it-works" data-reveal>
@@ -471,7 +534,7 @@ function TopicPage({ trackFilter, onTrackChange, completedIds, onToggle, firebas
   );
 }
 
-function BookCard({ book, saved, onToggle, style }) {
+function BookCard({ book, saved, onToggle, style, onQuickRead }) {
   const link = book.publicPath ? `${import.meta.env.BASE_URL}${book.publicPath}` : book.href;
   return (
     <article className="book-card" style={style}>
@@ -490,6 +553,16 @@ function BookCard({ book, saved, onToggle, style }) {
           <a className="source-link" href={link} target="_blank" rel="noopener noreferrer">
             {book.publicPath ? "Read or download PDF" : book.source}<span aria-hidden="true"> ↗</span>
           </a>
+          {onQuickRead && (
+            <button
+              type="button"
+              className="quick-preview-btn"
+              onClick={() => onQuickRead(book)}
+              aria-label={`Preview ${book.title}`}
+            >
+              Preview
+            </button>
+          )}
           <button className={`bookmark-button ${saved ? "is-saved" : ""}`} onClick={() => onToggle(book)}
             aria-label={`${saved ? "Remove" : "Save"} ${book.title}`} aria-pressed={saved}>{saved ? "✳" : "＋"}</button>
         </div>
@@ -498,7 +571,7 @@ function BookCard({ book, saved, onToggle, style }) {
   );
 }
 
-function BookPage({ savedIds, onToggleSaved, initialSavedOnly = false, privateLibrary = false }) {
+function BookPage({ savedIds, onToggleSaved, initialSavedOnly = false, privateLibrary = false, onQuickRead }) {
   const location = useLocation();
   const [track, setTrack] = useState(initialSavedOnly ? "all" : "all");
   const [grade, setGrade] = useState("all");
@@ -565,7 +638,7 @@ function BookPage({ savedIds, onToggleSaved, initialSavedOnly = false, privateLi
         <span>{visibleBooks.length} {visibleBooks.length === 1 ? "resource" : "resources"}</span></div>
       <div className="book-grid">
         {displayedBooks.map((book, index) => <BookCard key={book.id} book={book} saved={savedIds.includes(book.id)}
-          onToggle={onToggleSaved} style={{ "--card-index": index }} />)}
+          onToggle={onToggleSaved} onQuickRead={onQuickRead} style={{ "--card-index": index }} />)}
       </div>
       {visibleBooks.length > displayedBooks.length && <button className="load-more-button" onClick={() => setVisibleCount((count) => count + 12)}>
         Show more sources · {visibleBooks.length - displayedBooks.length} remaining ↘
@@ -926,7 +999,7 @@ function HomeRoute() {
   const study = useStudy();
   const navigate = useNavigate();
   return <HomePage savedCount={study.savedIds.length} savedIds={study.savedIds} onToggleSaved={study.toggleSaved}
-    completedCount={study.completedCount} user={study.user}
+    completedCount={study.completedCount} user={study.user} onQuickRead={study.openQuickReader}
     onChooseTrack={(stream) => {
       study.setTrackFilter(stream);
       navigate("/dashboard/progress");
@@ -935,7 +1008,31 @@ function HomeRoute() {
 
 function LibraryRoute() {
   const study = useStudy();
-  return <BookPage savedIds={study.savedIds} onToggleSaved={study.toggleSaved} />;
+  return <BookPage savedIds={study.savedIds} onToggleSaved={study.toggleSaved} onQuickRead={study.openQuickReader} />;
+}
+
+function NotesRoute() {
+  const study = useStudy();
+  return <NotesLibrary onQuickRead={study.openQuickReader} />;
+}
+
+function CoachingRoute() {
+  const study = useStudy();
+  return <CoachingMaterial onQuickRead={study.openQuickReader} />;
+}
+
+function PYQRoute() {
+  const study = useStudy();
+  return <PYQExplorer onQuickRead={study.openQuickReader} />;
+}
+
+function TestSeriesRoute() {
+  const study = useStudy();
+  return <TestSeries onQuickRead={study.openQuickReader} />;
+}
+
+function TrigoRoute() {
+  return <TrigoStudio />;
 }
 
 function AuthRoute({ mode }) {
@@ -1038,8 +1135,8 @@ function DashboardOverviewRoute() {
 }
 
 function DashboardLibraryRoute() {
-  const { savedIds, toggleSaved } = useStudy();
-  return <BookPage savedIds={savedIds} onToggleSaved={toggleSaved} privateLibrary />;
+  const { savedIds, toggleSaved, openQuickReader } = useStudy();
+  return <BookPage savedIds={savedIds} onToggleSaved={toggleSaved} onQuickRead={openQuickReader} privateLibrary />;
 }
 
 function DashboardProgressRoute() {
@@ -1094,8 +1191,50 @@ function App() {
   const [savedIds, setSavedIds] = useState(guestProfile.savedBookIds);
   const [completedIds, setCompletedIds] = useState(guestProfile.completedUnitIds);
   const [bookProgress, setBookProgress] = useState({});
-  const [entered, setEntered] = useState(false);
-  const handleEntry = useCallback(() => setEntered(true), []);
+  const [isCmdOpen, setIsCmdOpen] = useState(false);
+  const [quickReadBook, setQuickReadBook] = useState(null);
+  const [isAudioMuted, setIsAudioMuted] = useState(() => soundEngine.isMuted());
+
+  // Fixed entered state: respect session persistence and don't trap deep link reloads
+  const [entered, setEntered] = useState(() => {
+    try {
+      return (
+        sessionStorage.getItem("study-shelf:entered") === "1" ||
+        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ||
+        window.location.pathname.length > 2
+      );
+    } catch {
+      return false;
+    }
+  });
+
+  const handleEntry = useCallback(() => {
+    setEntered(true);
+  }, []);
+
+  const handleReplayIntro = useCallback(() => {
+    try {
+      sessionStorage.removeItem("study-shelf:entered");
+    } catch {}
+    setEntered(false);
+  }, []);
+
+  const handleToggleAudio = useCallback(() => {
+    const next = soundEngine.toggleMute();
+    setIsAudioMuted(next);
+  }, []);
+
+  // Global Ctrl+K / Cmd+K search palette listener
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setIsCmdOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
   const [user, setUser] = useState(null);
   const [, setDisplayNameRefresh] = useState("");
   const [firebaseServices, setFirebaseServices] = useState(null);
@@ -1322,7 +1461,11 @@ function App() {
     const titles = {
       "/": "Study Shelf — Find your next great book",
       "/library": "Discover books — Study Shelf",
+      "/notes": "Notes & Formulas — Study Shelf",
+      "/coaching": "Coaching Material — Study Shelf",
       "/pyq": "Past papers — Study Shelf",
+      "/tests": "Mock Test Series — Study Shelf",
+      "/trigo": "Trigo Lab & Unit Circle — Study Shelf",
       "/about": "About — Study Shelf",
       "/privacy": "Privacy — Study Shelf",
       "/terms": "Terms — Study Shelf",
@@ -1341,6 +1484,7 @@ function App() {
     trackFilter, setTrackFilter, toggleSaved, toggleUnit, onSignOut: handleSignOut,
     deleteAccount, persistProfile, updateBookProgress,
     updateDisplayName,
+    openQuickReader: (book) => setQuickReadBook(book),
     retryFirebase: () => { setSyncError(""); setFirebaseReady(false); setConnectionAttempt((value) => value + 1); },
     theme, setTheme, navigateToLogin: () => navigate("/login"),
   };
@@ -1367,33 +1511,50 @@ function App() {
         <>
           <MotionEffects />
           <CustomCursor />
-          <Header user={user} route={location.pathname} savedCount={savedIds.length} onSignOut={handleSignOut} syncError={syncError} />
-      <main id="top">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={location.pathname}
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -18 }}
-            transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-            className="page-transition"
-          >
-            <Outlet />
-          </motion.div>
-        </AnimatePresence>
-      </main>
-      <Footer user={user} />
-      <div className="firebase-status" aria-live="polite">
-        <span className={`status-dot ${firebaseConfigured && user && firebaseReady && !syncError ? "status-live" : ""}`} />
-        {firebaseConfigured
-          ? user ? firebaseReady ? "Signed in · cloud sync on" : "Syncing your free account…"
-            : "Guest shelf · sign in to sync"
-          : "Guest mode · saved on this browser"}
-      </div>
-      </>
-    ) : (
-      <EntrySequence onEnter={handleEntry} />
-    )}
+          <Header
+            user={user}
+            route={location.pathname}
+            savedCount={savedIds.length}
+            onSignOut={handleSignOut}
+            syncError={syncError}
+            onOpenCommandPalette={() => setIsCmdOpen(true)}
+            onToggleAudio={handleToggleAudio}
+            isAudioMuted={isAudioMuted}
+          />
+          <main id="top">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={location.pathname}
+                initial={{ opacity: 0, y: 18 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -18 }}
+                transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                className="page-transition"
+              >
+                <Outlet />
+              </motion.div>
+            </AnimatePresence>
+          </main>
+          <Footer user={user} onReplayIntro={handleReplayIntro} />
+          <CommandPalette isOpen={isCmdOpen} onClose={() => setIsCmdOpen(false)} />
+          <QuickReaderModal
+            book={quickReadBook}
+            isOpen={Boolean(quickReadBook)}
+            onClose={() => setQuickReadBook(null)}
+            isSaved={savedIds.includes(quickReadBook?.id)}
+            onToggleSaved={toggleSaved}
+          />
+          <div className="firebase-status" aria-live="polite">
+            <span className={`status-dot ${firebaseConfigured && user && firebaseReady && !syncError ? "status-live" : ""}`} />
+            {firebaseConfigured
+              ? user ? firebaseReady ? "Signed in · cloud sync on" : "Syncing your free account…"
+                : "Guest shelf · sign in to sync"
+              : "Guest mode · saved on this browser"}
+          </div>
+        </>
+      ) : (
+        <EntrySequence onEnter={handleEntry} />
+      )}
     </StudyContext.Provider>
   );
 }
@@ -1408,7 +1569,11 @@ const router = createBrowserRouter([{
   children: [
     { index: true, element: <HomeRoute /> },
     { path: "library", element: <LibraryRoute /> },
-    { path: "pyq", element: <PYQExplorer /> },
+    { path: "notes", element: <NotesRoute /> },
+    { path: "coaching", element: <CoachingRoute /> },
+    { path: "pyq", element: <PYQRoute /> },
+    { path: "tests", element: <TestSeriesRoute /> },
+    { path: "trigo", element: <TrigoRoute /> },
     { path: "community", element: <Navigate to="/library" replace /> },
     { path: "book/:id", element: <BookDetailPage /> },
     { path: "about", element: <InfoPage kind="about" /> },
