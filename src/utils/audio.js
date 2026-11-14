@@ -12,12 +12,40 @@ class SoundEngine {
     this.ambienceVolume = 0.35;
     this.lofiTimer = null;
     this.frequencyArray = null;
+    this.listeners = new Set();
 
     try {
       this.muted = localStorage.getItem("study-shelf:audio-muted") === "true";
     } catch {
       this.muted = false;
     }
+  }
+
+  subscribe(callback) {
+    this.listeners.add(callback);
+    callback({
+      currentAmbience: this.currentAmbience,
+      muted: this.muted,
+      volume: this.ambienceVolume,
+    });
+    return () => {
+      this.listeners.delete(callback);
+    };
+  }
+
+  notify() {
+    const state = {
+      currentAmbience: this.currentAmbience,
+      muted: this.muted,
+      volume: this.ambienceVolume,
+    };
+    this.listeners.forEach((callback) => {
+      try {
+        callback(state);
+      } catch (err) {
+        console.error("Audio subscriber error:", err);
+      }
+    });
   }
 
   init() {
@@ -57,6 +85,7 @@ class SoundEngine {
     } else if (!this.muted && this.ambienceGain) {
       this.ambienceGain.gain.setValueAtTime(this.ambienceVolume, this.ctx?.currentTime || 0);
     }
+    this.notify();
   }
 
   toggleMute() {
@@ -168,10 +197,12 @@ class SoundEngine {
 
     if (type === "none" || !type) {
       this.currentAmbience = "none";
+      this.notify();
       return;
     }
 
     this.currentAmbience = type;
+    this.notify();
 
     try {
       this.ambienceGain = this.ctx.createGain();
@@ -345,6 +376,56 @@ class SoundEngine {
     if (this.ambienceGain && !this.muted) {
       this.ambienceGain.gain.setValueAtTime(this.ambienceVolume, this.ctx?.currentTime || 0);
     }
+    this.notify();
+  }
+
+  // Success chime for CBT correct answer / high score
+  playSuccess() {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx) return;
+    try {
+      const now = this.ctx.currentTime;
+      [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now + i * 0.08);
+        gain.gain.setValueAtTime(0.001, now + i * 0.08);
+        gain.gain.linearRampToValueAtTime(0.04, now + i * 0.08 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.08 + 0.35);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now + i * 0.08);
+        osc.stop(now + i * 0.08 + 0.36);
+      });
+    } catch {}
+  }
+
+  // Error buzz for CBT incorrect answer / alert
+  playError() {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(140, now);
+      osc.frequency.linearRampToValueAtTime(90, now + 0.2);
+      gain.gain.setValueAtTime(0.035, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.22);
+    } catch {}
+  }
+
+  // Holographic card tilt magnetic tick
+  playTiltTick() {
+    this.playBeep(1200, "sine", 0.015, 0.008);
   }
 }
 

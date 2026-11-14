@@ -24,11 +24,13 @@ export function CommandPalette({ isOpen, onClose }) {
   const quickActions = [
     { id: "act-home", title: "Home — Cosmos Portal", category: "Navigation", path: "/", icon: "⌂" },
     { id: "act-library", title: "Discover — Books & Open Library", category: "Navigation", path: "/library", icon: "▤" },
-    { id: "act-trigo", title: "Interactive Trigo Lab & Unit Circle", category: "Tools", path: "/trigo", icon: "◉" },
+    { id: "act-drill", title: "CBT Drill — NTA Mock Exam Simulator", category: "Simulator", path: "/drill", icon: "⚡" },
+    { id: "act-chem", title: "Chem Nexus — Periodic Matrix & Flame Lab", category: "Tools", path: "/chem", icon: "🧪" },
+    { id: "act-trigo", title: "Interactive Trigo Lab & Unit Circle", category: "Tools", path: "/trigo", icon: "📐" },
     { id: "act-notes", title: "Notes Library & Formula Sheets", category: "Navigation", path: "/notes", icon: "∑" },
     { id: "act-coaching", title: "Coaching Material (Allen, PW, Reso)", category: "Navigation", path: "/coaching", icon: "🏫" },
     { id: "act-pyq", title: "Past Papers (PYQs) 1978–2025", category: "Navigation", path: "/pyq", icon: "📄" },
-    { id: "act-tests", title: "Mock Test Series & CBT Simulator", category: "Navigation", path: "/tests", icon: "⚡" },
+    { id: "act-tests", title: "Mock Test Series & CBT Simulator", category: "Navigation", path: "/tests", icon: "🎯" },
     { id: "act-study-map", title: "Study Map & Syllabus Progress", category: "Workspace", path: "/dashboard/progress", icon: "✓" },
   ];
 
